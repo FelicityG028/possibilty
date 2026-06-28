@@ -2,9 +2,9 @@ import { Link, useLocation } from 'react-router-dom'
 import { useUIStore } from '@/store/uiStore'
 
 const navItems = [
-  { to: '/', label: '今日', icon: '📅', section: 'General' },
-  { to: '/tasks', label: '任务', icon: '✅', section: 'General' },
-  { to: '/settings', label: '设置', icon: '⚙️', section: 'Tools' },
+  { to: '/', label: '今日', section: 'General' },
+  { to: '/tasks', label: '任务', section: 'General' },
+  { to: '/settings', label: '设置', section: 'Tools' },
 ]
 
 export function Sidebar() {
@@ -69,12 +69,6 @@ export function Sidebar() {
                         style={{ backgroundColor: '#111111' }}
                       />
                     )}
-                    <span
-                      className="text-base"
-                      style={active ? { opacity: 1 } : { opacity: 0.6 }}
-                    >
-                      {item.icon}
-                    </span>
                     <span>{item.label}</span>
                   </Link>
                 )

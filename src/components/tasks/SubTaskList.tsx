@@ -142,7 +142,18 @@ export function SubTaskList() {
           const days = daysUntil(t.deadline)
           const overdue = days < 0 && t.status !== 'completed' && !isRecurring
           return (
-            <div key={t.id} className="card p-4 hover:shadow-md transition-shadow">
+            <div
+              key={t.id}
+              className="relative p-4 pl-5 rounded-lg hover:shadow-md transition-shadow"
+              style={{
+                backgroundColor: '#EEE8DC',
+                border: '1.5px dashed #111111',
+              }}
+            >
+              <span
+                className="absolute left-0 top-2 bottom-2 w-1 rounded-r"
+                style={{ backgroundColor: '#EDBCDC' }}
+              />
               <div className="flex items-start justify-between gap-4">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1 flex-wrap">
@@ -157,11 +168,17 @@ export function SubTaskList() {
                       <span>{cat?.name}</span>
                     </span>
                     {isRecurring ? (
-                      <span className="px-2 py-0.5 rounded text-xs bg-pink-100 text-pink-700">
+                      <span
+                        className="px-2 py-0.5 rounded text-xs"
+                        style={{ backgroundColor: '#EDBCDC', color: '#111111' }}
+                      >
                         ⏰ 每日 {t.daily_hours}h
                       </span>
                     ) : (
-                      <span className="px-2 py-0.5 rounded text-xs bg-rose-100 text-rose-600">
+                      <span
+                        className="px-2 py-0.5 rounded text-xs"
+                        style={{ backgroundColor: '#EDBCDC', color: '#111111' }}
+                      >
                         📚 有限
                       </span>
                     )}
@@ -181,7 +198,9 @@ export function SubTaskList() {
                       </span>
                     )}
                   </div>
-                  <h3 className="font-medium text-gray-900 truncate">{t.name}</h3>
+                  <h3 className="font-medium truncate" style={{ color: '#EDBCDC' }}>
+                    {t.name}
+                  </h3>
                   <div className="text-xs text-gray-500 mt-0.5">
                     {isRecurring ? (
                       <>每天分配 {t.daily_hours}h</>

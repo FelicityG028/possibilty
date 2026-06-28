@@ -15,7 +15,7 @@ const sizeClasses: Record<Size, string> = {
 }
 
 const variantClasses: Record<Variant, string> = {
-  primary: 'bg-rose-500 text-white hover:bg-rose-600 focus:ring-rose-500',
+  primary: 'text-white hover:opacity-90 focus:ring-[#111111]',
   secondary:
     'bg-white text-[#111111] hover:bg-gray-50 focus:ring-rose-500',
   ghost: 'text-gray-600 hover:bg-gray-100 focus:ring-gray-500',
@@ -31,7 +31,9 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       ref={ref}
       className={`inline-flex items-center justify-center rounded-md font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed ${sizeClasses[size]} ${variantClasses[variant]} ${className}`}
       style={
-        variant === 'secondary'
+        variant === 'primary'
+          ? { backgroundColor: '#111111' }
+          : variant === 'secondary'
           ? { border: '1.5px dashed #111111' }
           : undefined
       }

@@ -58,11 +58,8 @@ export function MonthCalendar() {
   const today = new Date()
 
   return (
-    <div className="card overflow-hidden">
-      <div
-        className="px-4 py-3 border-b flex items-center justify-between"
-        style={{ borderColor: '#111111' }}
-      >
+    <div className="overflow-hidden">
+      <div className="px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <button
             onClick={() => setCursor((c) => subMonths(c, 1))}

@@ -5,20 +5,27 @@ export function ViewSwitcher() {
   const setViewMode = useUIStore((s) => s.setViewMode)
 
   return (
-    <div className="inline-flex rounded-md border border-gray-300 bg-white p-0.5">
-      {(['calendar', 'gantt'] as const).map((mode) => (
-        <button
-          key={mode}
-          onClick={() => setViewMode(mode)}
-          className={`px-3 py-1.5 text-sm font-medium rounded ${
-            viewMode === mode
-              ? 'bg-rose-500 text-white'
-              : 'text-gray-600 hover:text-gray-900'
-          }`}
-        >
-          {mode === 'calendar' ? '📅 日历' : '📊 甘特'}
-        </button>
-      ))}
+    <div
+      className="inline-flex rounded-md p-0.5"
+      style={{ border: '1.5px dashed #111111' }}
+    >
+      {(['calendar', 'gantt'] as const).map((mode) => {
+        const active = viewMode === mode
+        return (
+          <button
+            key={mode}
+            onClick={() => setViewMode(mode)}
+            className="px-3 py-1.5 text-sm font-medium rounded transition-colors"
+            style={
+              active
+                ? { backgroundColor: '#111111', color: '#FFFCF3' }
+                : { backgroundColor: '#FFFCF3', color: '#111111' }
+            }
+          >
+            {mode === 'calendar' ? '日历' : '甘特'}
+          </button>
+        )
+      })}
     </div>
   )
 }

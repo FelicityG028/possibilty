@@ -94,16 +94,18 @@ export function DashboardPage() {
       )}
 
       {/* 今日摘要 - 可折叠 */}
-      <div className="card p-4">
+      <div className="p-4">
         <button
           type="button"
           onClick={() => setTodayExpanded((v) => !v)}
           className="w-full flex items-center justify-between text-left"
         >
           <div className="flex items-center gap-2">
-            <h2 className="text-base font-semibold text-gray-900">今日任务</h2>
-            <span className="text-sm text-gray-500">
-              共 <b className="text-gray-900">{todayEntries.length}</b> 项
+            <h2 className="text-base font-semibold" style={{ color: '#111111' }}>
+              今日任务
+            </h2>
+            <span className="text-sm" style={{ color: '#111111' }}>
+              共 <b style={{ color: '#111111' }}>{todayEntries.length}</b> 项
               {todayEntries.length > 0 && ` · ${todayHours.toFixed(1)}h / ${available}h`}
             </span>
           </div>
@@ -114,8 +116,11 @@ export function DashboardPage() {
               </span>
             )}
             <span
-              className="text-gray-400 transition-transform"
-              style={{ transform: todayExpanded ? 'rotate(180deg)' : 'rotate(0deg)' }}
+              className="transition-transform"
+              style={{
+                transform: todayExpanded ? 'rotate(180deg)' : 'rotate(0deg)',
+                color: '#111111',
+              }}
             >
               ▼
             </span>
@@ -150,8 +155,15 @@ export function DashboardPage() {
                   return (
                     <div
                       key={e.id}
-                      className="flex items-center gap-3 p-2 rounded hover:bg-gray-50"
+                      className="relative flex items-center gap-3 p-2 pl-4 rounded transition-colors"
+                      style={{ backgroundColor: 'transparent' }}
+                      onMouseEnter={(ev) => (ev.currentTarget.style.backgroundColor = '#EEE8DC')}
+                      onMouseLeave={(ev) => (ev.currentTarget.style.backgroundColor = 'transparent')}
                     >
+                      <span
+                        className="absolute left-0 top-2 bottom-2 w-1 rounded-r"
+                        style={{ backgroundColor: '#EDBCDC' }}
+                      />
                       <span
                         className="w-1 self-stretch rounded-full"
                         style={{ backgroundColor: cat?.color }}
