@@ -83,7 +83,7 @@ export function MonthCalendar() {
               setCursor(new Date())
               setSelectedDate(toIso(new Date()))
             }}
-            className="ml-2 px-2 py-1 text-xs text-blue-600 hover:bg-blue-50 rounded"
+            className="ml-2 px-2 py-1 text-xs text-rose-500 hover:bg-rose-50 rounded"
           >
             今天
           </button>
@@ -135,7 +135,7 @@ export function MonthCalendar() {
                 <span
                   className={`inline-flex items-center justify-center w-6 h-6 text-xs rounded-full ${
                     isToday
-                      ? 'bg-blue-600 text-white font-medium'
+                      ? 'bg-rose-500 text-white font-medium'
                       : inMonth
                       ? 'text-gray-900'
                       : 'text-gray-400'
@@ -185,7 +185,7 @@ export function MonthCalendar() {
                                     ? '#10b981'
                                     : overflow
                                     ? '#fb923c'
-                                    : '#3b82f6',
+                                    : '#f43f5e',
                               }}
                             />
                           </div>

@@ -12,7 +12,7 @@ export function ViewSwitcher() {
           onClick={() => setViewMode(mode)}
           className={`px-3 py-1.5 text-sm font-medium rounded ${
             viewMode === mode
-              ? 'bg-blue-600 text-white'
+              ? 'bg-rose-500 text-white'
               : 'text-gray-600 hover:text-gray-900'
           }`}
         >

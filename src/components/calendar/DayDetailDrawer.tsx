@@ -264,7 +264,7 @@ function ActualStepper({
   return (
     <div className="flex items-center gap-2 flex-wrap">
       <span className="text-xs text-gray-500">实际：</span>
-      <div className="flex items-center border border-gray-300 rounded overflow-hidden focus-within:ring-2 focus-within:ring-blue-500">
+      <div className="flex items-center border border-gray-300 rounded overflow-hidden focus-within:ring-2 focus-within:ring-rose-500">
         <button
           type="button"
           onClick={() => adjust(-step)}

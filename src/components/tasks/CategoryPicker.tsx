@@ -174,7 +174,7 @@ export function CategoryPicker({
             onClick={() => onChange(c.id)}
             className={`flex flex-col items-center justify-center p-3 rounded-lg border-2 transition-all ${
               selected
-                ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-200'
+                ? 'border-rose-500 bg-rose-50 ring-2 ring-rose-200'
                 : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
             }`}
           >

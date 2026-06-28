@@ -161,7 +161,7 @@ export function SubTaskList() {
                         ⏰ 每日 {t.daily_hours}h
                       </span>
                     ) : (
-                      <span className="px-2 py-0.5 rounded text-xs bg-blue-100 text-blue-700">
+                      <span className="px-2 py-0.5 rounded text-xs bg-rose-100 text-rose-600">
                         📚 有限
                       </span>
                     )}

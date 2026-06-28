@@ -50,7 +50,7 @@ export function GanttChart() {
         <h2 className="text-lg font-semibold text-gray-900">甘特图</h2>
         <div className="text-xs text-gray-500 flex items-center gap-3">
           <span className="flex items-center gap-1">
-            <span className="w-2 h-2 rounded-full bg-blue-500" /> 计划区间
+            <span className="w-2 h-2 rounded-full bg-rose-500" /> 计划区间
           </span>
           <span className="flex items-center gap-1">
             <span className="w-2 h-2 rounded-full bg-green-500" /> 已完成
@@ -81,10 +81,10 @@ export function GanttChart() {
                       key={i}
                       className={`flex-shrink-0 border-r border-gray-100 text-xs flex flex-col items-center justify-center ${
                         weekend ? 'bg-gray-50' : ''
-                      } ${isToday ? 'bg-blue-50' : ''}`}
+                      } ${isToday ? 'bg-rose-50' : ''}`}
                       style={{ width: DAY_WIDTH, height: HEADER_HEIGHT }}
                     >
-                      <span className={`text-sm font-medium ${isToday ? 'text-blue-700' : 'text-gray-700'}`}>
+                      <span className={`text-sm font-medium ${isToday ? 'text-rose-600' : 'text-gray-700'}`}>
                         {format(d, 'd')}
                       </span>
                       <span className="text-gray-400">{format(d, 'M月')}</span>
