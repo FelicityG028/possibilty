@@ -25,7 +25,11 @@ export function SettingsPage() {
 
   return (
     <div className="space-y-6 max-w-2xl">
-      <h1 className="text-2xl font-bold text-gray-900">设置</h1>
+      <div className="p-4 rounded-lg" style={{ backgroundColor: '#EEE8DC' }}>
+        <h1 className="text-2xl font-bold" style={{ color: '#EDBCDC' }}>
+          设置
+        </h1>
+      </div>
 
       <section className="card p-5">
         <h2 className="text-base font-semibold text-gray-900 mb-1">默认每日学习时间</h2>

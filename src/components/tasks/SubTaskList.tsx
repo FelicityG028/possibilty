@@ -240,8 +240,11 @@ export function SubTaskList() {
                     const proj = getProjectedCompletion(t, entries, todayIso())
                     if (!proj || proj.delta <= 0) return null
                     return (
-                      <div className="bg-orange-50 border border-orange-200 rounded-md px-3 py-2 text-xs">
-                        <div className="flex items-center gap-1 text-orange-800 font-medium">
+                      <div
+                        className="rounded-md px-3 py-2 text-xs"
+                        style={{ backgroundColor: '#BBCAE7', color: '#111111' }}
+                      >
+                        <div className="flex items-center gap-1 font-medium">
                           <span>⚠️</span>
                           <span>
                             按当前计划，到 {format(new Date(t.deadline!), 'M月d日')} 还差{' '}
@@ -250,7 +253,7 @@ export function SubTaskList() {
                           </span>
                         </div>
                         {proj.requiredDailyHours != null && (
-                          <div className="text-orange-700 mt-0.5">
+                          <div className="mt-0.5">
                             要按时完成，每天需{' '}
                             <b className="tabular-nums">{proj.requiredDailyHours.toFixed(1)}</b>h
                             （当前默认 {defaultSettingHours}h/天）

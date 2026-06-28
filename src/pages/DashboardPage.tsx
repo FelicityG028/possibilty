@@ -64,14 +64,17 @@ export function DashboardPage() {
 
       {/* 按计划预测：当前是否能按时完成所有任务？ */}
       {projection.wontFinishCount > 0 && (
-        <div className="card p-4 bg-gradient-to-r from-orange-50 to-amber-50 border-orange-200">
+        <div
+          className="p-4 rounded-lg"
+          style={{ backgroundColor: '#BBCAE7', color: '#111111' }}
+        >
           <div className="flex items-start gap-2">
-            <span className="text-orange-500 text-lg">⚠️</span>
+            <span className="text-lg">⚠️</span>
             <div className="flex-1">
-              <p className="text-sm font-medium text-orange-900">
+              <p className="text-sm font-medium">
                 按当前计划，{projection.wontFinishCount} 个任务无法按时完成
               </p>
-              <p className="text-xs text-orange-700 mt-1">
+              <p className="text-xs mt-1">
                 总差额：
                 <b className="tabular-nums mx-1">
                   {projection.totalDelta.toFixed(0)}
@@ -79,7 +82,7 @@ export function DashboardPage() {
                 单位（预计完成 {(projection.totalProjected / Math.max(1, projection.totalAmount) * 100).toFixed(0)}%）
               </p>
               {projection.requiredExtraDailyHours > 0 && (
-                <p className="text-xs text-orange-700 mt-1">
+                <p className="text-xs mt-1">
                   💡 要全部按时完成，每天需要额外加{' '}
                   <b className="tabular-nums">{projection.requiredExtraDailyHours.toFixed(1)}</b>h
                   （或调整任务/截止日期）

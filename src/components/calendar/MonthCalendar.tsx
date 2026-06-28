@@ -59,7 +59,10 @@ export function MonthCalendar() {
 
   return (
     <div className="card overflow-hidden">
-      <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
+      <div
+        className="px-4 py-3 border-b flex items-center justify-between"
+        style={{ borderColor: '#111111' }}
+      >
         <div className="flex items-center gap-2">
           <button
             onClick={() => setCursor((c) => subMonths(c, 1))}
@@ -68,7 +71,7 @@ export function MonthCalendar() {
           >
             ‹
           </button>
-          <h2 className="text-lg font-semibold text-gray-900 w-32 text-center">
+          <h2 className="text-lg font-semibold w-32 text-center" style={{ color: '#111111' }}>
             {format(cursor, 'yyyy 年 M 月')}
           </h2>
           <button
@@ -83,16 +86,24 @@ export function MonthCalendar() {
               setCursor(new Date())
               setSelectedDate(toIso(new Date()))
             }}
-            className="ml-2 px-2 py-1 text-xs text-rose-500 hover:bg-rose-50 rounded"
+            className="ml-2 px-2 py-1 text-xs rounded"
+            style={{ color: '#111111' }}
           >
             今天
           </button>
         </div>
       </div>
 
-      <div className="grid grid-cols-7 border-b border-gray-200 bg-gray-50">
+      <div
+        className="grid grid-cols-7 border-b"
+        style={{ borderColor: '#111111' }}
+      >
         {WEEKDAYS.map((d) => (
-          <div key={d} className="py-2 text-center text-xs font-medium text-gray-500">
+          <div
+            key={d}
+            className="py-2 text-center text-xs font-medium"
+            style={{ color: '#111111' }}
+          >
             {d}
           </div>
         ))}
@@ -127,19 +138,21 @@ export function MonthCalendar() {
                 setSelectedDate(iso)
                 setOpenDate(iso)
               }}
-              className={`relative h-20 sm:h-24 border-b border-r border-gray-100 px-2 py-1.5 text-left hover:bg-gray-50 transition-colors ${
-                inMonth ? '' : 'bg-gray-50/50'
+              className={`relative h-20 sm:h-24 px-2 py-1.5 text-left transition-colors ${
+                inMonth ? '' : 'opacity-50'
               }`}
+              style={{
+                borderRight: '1.5px dashed #111111',
+                borderBottom: '1.5px dashed #111111',
+                backgroundColor: isToday ? '#EDBCDC' : 'transparent',
+              }}
             >
               <div className="flex items-center justify-between">
                 <span
                   className={`inline-flex items-center justify-center w-6 h-6 text-xs rounded-full ${
-                    isToday
-                      ? 'bg-rose-500 text-white font-medium'
-                      : inMonth
-                      ? 'text-gray-900'
-                      : 'text-gray-400'
+                    isToday ? 'font-semibold' : ''
                   }`}
+                  style={{ color: '#111111' }}
                 >
                   {format(day, 'd')}
                 </span>
