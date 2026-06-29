@@ -101,7 +101,10 @@ export function DashboardPage() {
           className="w-full flex items-center justify-between text-left"
         >
           <div className="flex items-center gap-2">
-            <h2 className="text-base font-semibold" style={{ color: '#111111' }}>
+            <h2
+              className="text-base font-semibold px-3 py-1 rounded"
+              style={{ backgroundColor: '#111111', color: 'white' }}
+            >
               今日任务
             </h2>
             <span className="text-sm" style={{ color: '#111111' }}>
@@ -155,18 +158,20 @@ export function DashboardPage() {
                   return (
                     <div
                       key={e.id}
-                      className="relative flex items-center gap-3 p-2 pl-4 rounded transition-colors"
-                      style={{ backgroundColor: 'transparent' }}
-                      onMouseEnter={(ev) => (ev.currentTarget.style.backgroundColor = '#EEE8DC')}
-                      onMouseLeave={(ev) => (ev.currentTarget.style.backgroundColor = 'transparent')}
+                      className="relative flex items-center gap-3 p-2 pl-4 rounded cursor-pointer transition-colors"
+                      style={{ backgroundColor: '#FFFCF3', color: '#111111' }}
+                      onMouseEnter={(ev) => {
+                        ev.currentTarget.style.backgroundColor = '#111111'
+                        ev.currentTarget.style.color = 'white'
+                      }}
+                      onMouseLeave={(ev) => {
+                        ev.currentTarget.style.backgroundColor = '#FFFCF3'
+                        ev.currentTarget.style.color = '#111111'
+                      }}
                     >
                       <span
                         className="absolute left-0 top-2 bottom-2 w-1 rounded-r"
                         style={{ backgroundColor: '#EDBCDC' }}
-                      />
-                      <span
-                        className="w-1 self-stretch rounded-full"
-                        style={{ backgroundColor: cat?.color }}
                       />
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-1 text-xs text-gray-500 mb-0.5">

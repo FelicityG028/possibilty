@@ -144,10 +144,9 @@ export function SubTaskList() {
           return (
             <div
               key={t.id}
-              className="relative p-4 pl-5 rounded-lg hover:shadow-md transition-shadow"
+              className="relative p-4 pl-5 rounded-lg transition-shadow"
               style={{
                 backgroundColor: '#EEE8DC',
-                border: '1.5px dashed #111111',
               }}
             >
               <span
@@ -198,7 +197,7 @@ export function SubTaskList() {
                       </span>
                     )}
                   </div>
-                  <h3 className="font-medium truncate" style={{ color: '#EDBCDC' }}>
+                  <h3 className="font-medium truncate" style={{ color: '#111111' }}>
                     {t.name}
                   </h3>
                   <div className="text-xs text-gray-500 mt-0.5">

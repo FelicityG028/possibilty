@@ -58,7 +58,10 @@ export function MonthCalendar() {
   const today = new Date()
 
   return (
-    <div className="overflow-hidden">
+    <div
+      className="overflow-hidden rounded-lg"
+      style={{ border: '1.5px dashed #111111' }}
+    >
       <div className="px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <button
@@ -68,7 +71,10 @@ export function MonthCalendar() {
           >
             ‹
           </button>
-          <h2 className="text-lg font-semibold w-32 text-center" style={{ color: '#111111' }}>
+          <h2
+            className="text-lg font-semibold w-32 text-center px-3 py-1 rounded"
+            style={{ backgroundColor: '#111111', color: 'white' }}
+          >
             {format(cursor, 'yyyy 年 M 月')}
           </h2>
           <button
@@ -141,15 +147,17 @@ export function MonthCalendar() {
               style={{
                 borderRight: '1.5px dashed #111111',
                 borderBottom: '1.5px dashed #111111',
-                backgroundColor: isToday ? '#EDBCDC' : 'transparent',
+                backgroundColor: 'transparent',
               }}
             >
               <div className="flex items-center justify-between">
                 <span
-                  className={`inline-flex items-center justify-center w-6 h-6 text-xs rounded-full ${
-                    isToday ? 'font-semibold' : ''
-                  }`}
-                  style={{ color: '#111111' }}
+                  className="inline-flex items-center justify-center w-6 h-6 text-xs rounded-full"
+                  style={
+                    isToday
+                      ? { backgroundColor: '#EDBCDC', color: '#111111', fontWeight: 600 }
+                      : { color: '#111111' }
+                  }
                 >
                   {format(day, 'd')}
                 </span>

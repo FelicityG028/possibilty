@@ -5,8 +5,16 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="min-h-screen flex" style={{ backgroundColor: '#FAF4E8' }}>
       <Sidebar />
-      <main className="flex-1 min-w-0 max-w-[1400px] mx-auto px-6 lg:px-10 py-6 lg:py-8">
-        {children}
+      <main className="flex-1 min-w-0 p-4">
+        <div
+          className="h-full rounded-3xl p-6 pb-2"
+          style={{
+            border: '2px solid #111111',
+            backgroundColor: 'transparent',
+          }}
+        >
+          {children}
+        </div>
       </main>
     </div>
   )
