@@ -160,7 +160,7 @@ export function SubTaskList() {
                       className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium"
                       style={{
                         backgroundColor: `${cat?.color}15`,
-                        color: cat?.color,
+                        color: '#111111',
                       }}
                     >
                       <span>{cat?.icon}</span>
