@@ -179,7 +179,10 @@ export function CategoryPicker({
             }`}
           >
             <span className="text-2xl mb-1">{c.icon}</span>
-            <span className="text-xs font-medium text-gray-700 text-center leading-tight">
+            <span
+              className="text-xs font-medium text-center leading-tight"
+              style={{ color: '#111111' }}
+            >
               {c.name}
             </span>
           </button>
