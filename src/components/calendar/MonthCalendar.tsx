@@ -72,10 +72,10 @@ export function MonthCalendar() {
             ‹
           </button>
           <h2
-            className="text-lg font-semibold w-32 text-center px-3 py-1 rounded"
+            className="text-lg font-semibold px-3 py-1 rounded whitespace-nowrap"
             style={{ backgroundColor: '#111111', color: 'white' }}
           >
-            {format(cursor, 'yyyy 年 M 月')}
+            {format(cursor, 'yyyy年M月')}
           </h2>
           <button
             onClick={() => setCursor((c) => addMonths(c, 1))}

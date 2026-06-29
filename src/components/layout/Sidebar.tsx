@@ -20,7 +20,7 @@ export function Sidebar() {
 
   return (
     <aside
-      className="w-60 h-screen flex flex-col sticky top-0 flex-shrink-0"
+      className="w-full h-full flex flex-col"
       style={{ backgroundColor: '#111111' }}
     >
       {/* Logo */}

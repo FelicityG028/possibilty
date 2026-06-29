@@ -8,7 +8,7 @@ interface ProgressBarProps {
 
 export function ProgressBar({
   value,
-  color = '#f43f5e',
+  color = '#BBCAE7',
   height = 8,
   showLabel = false,
   className = '',

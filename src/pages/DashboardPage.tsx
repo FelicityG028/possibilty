@@ -47,12 +47,15 @@ export function DashboardPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between flex-wrap gap-2">
+      <div
+        className="flex items-center justify-between flex-wrap gap-2 px-4 py-2 rounded-2xl"
+        style={{ border: '1px solid #111111' }}
+      >
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">
+          <h1 className="text-2xl font-bold" style={{ color: '#111111' }}>
             {format(new Date(today), 'M月d日')} · 今日
           </h1>
-          <p className="text-sm text-gray-500 mt-0.5">
+          <p className="text-sm mt-0.5" style={{ color: '#111111' }}>
             {activeTasks.length} 个进行中任务
           </p>
         </div>
@@ -161,12 +164,10 @@ export function DashboardPage() {
                       className="relative flex items-center gap-3 p-2 pl-4 rounded cursor-pointer transition-colors"
                       style={{ backgroundColor: '#FFFCF3', color: '#111111' }}
                       onMouseEnter={(ev) => {
-                        ev.currentTarget.style.backgroundColor = '#111111'
-                        ev.currentTarget.style.color = 'white'
+                        ev.currentTarget.style.backgroundColor = '#EEE8DC'
                       }}
                       onMouseLeave={(ev) => {
                         ev.currentTarget.style.backgroundColor = '#FFFCF3'
-                        ev.currentTarget.style.color = '#111111'
                       }}
                     >
                       <span

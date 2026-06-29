@@ -4,8 +4,8 @@ import { addDays, differenceInDays, format, isSameDay, isWeekend, startOfDay } f
 import { useSubTasks } from '@/hooks/useSubTasks'
 import { useCategories } from '@/hooks/useCategories'
 
-const DAY_WIDTH = 44 // 每个日期列宽 px（加宽方便看日期）
-const ROW_HEIGHT = 80 // 拉高行高（原 36 → 80）
+const DAY_WIDTH = 44
+const ROW_HEIGHT = 80
 const HEADER_HEIGHT = 64
 
 export function GanttChart() {
@@ -16,7 +16,6 @@ export function GanttChart() {
 
   const active = tasks.filter((t) => t.status !== 'completed')
 
-  // 全部可见日期 = 从所有 active 任务中取最早开始到最晚截止 + 前后各加 2 天 padding
   const { startDate, endDate, days } = useMemo(() => {
     if (active.length === 0) {
       const s = startOfDay(new Date())
@@ -26,7 +25,6 @@ export function GanttChart() {
     let start = today
     let end = today
     for (const t of active) {
-      // finite 用 deadline；recurring 取今天 + 30 天作为可视化窗口
       const dl = t.deadline ? new Date(t.deadline) : addDays(today, 30)
       if (dl < start) start = dl
       if (dl > end) end = dl
@@ -45,30 +43,40 @@ export function GanttChart() {
   const todayOffset = differenceInDays(today, startDate)
 
   return (
-    <div className="card overflow-hidden">
-      <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-gray-900">甘特图</h2>
-        <div className="text-xs text-gray-500 flex items-center gap-3">
+    <div
+      className="overflow-hidden rounded-lg"
+      style={{ backgroundColor: '#FFFCF3' }}
+    >
+      <div className="px-4 py-3 flex items-center justify-between">
+        <h2 className="text-lg font-semibold" style={{ color: '#111111' }}>
+          甘特图
+        </h2>
+        <div className="text-xs flex items-center gap-3" style={{ color: '#111111' }}>
           <span className="flex items-center gap-1">
-            <span className="w-2 h-2 rounded-full bg-rose-500" /> 计划区间
+            <span className="w-2 h-2 rounded-full" style={{ backgroundColor: '#BBCAE7' }} /> 计划区间
           </span>
           <span className="flex items-center gap-1">
-            <span className="w-2 h-2 rounded-full bg-green-500" /> 已完成
+            <span className="w-2 h-2 rounded-full" style={{ backgroundColor: '#10b981' }} /> 已完成
           </span>
         </div>
       </div>
 
       {active.length === 0 ? (
-        <div className="text-center text-gray-500 py-12">没有 active 任务可显示</div>
+        <div className="text-center py-12" style={{ color: '#111111' }}>
+          没有 active 任务可显示
+        </div>
       ) : (
         <div className="overflow-x-auto">
           <div style={{ width: days * DAY_WIDTH + 240, position: 'relative' }}>
             {/* 日期表头 */}
             <div
-              className="flex border-b border-gray-200 sticky top-0 bg-white z-10"
-              style={{ height: HEADER_HEIGHT }}
+              className="flex sticky top-0 z-10"
+              style={{ height: HEADER_HEIGHT, backgroundColor: '#FFFCF3' }}
             >
-              <div className="w-[240px] flex-shrink-0 px-4 py-2 text-sm font-medium text-gray-700 border-r border-gray-200 bg-gray-50">
+              <div
+                className="w-[240px] flex-shrink-0 px-4 py-2 text-sm font-medium"
+                style={{ color: '#111111' }}
+              >
                 任务
               </div>
               <div className="flex">
@@ -79,15 +87,22 @@ export function GanttChart() {
                   return (
                     <div
                       key={i}
-                      className={`flex-shrink-0 border-r border-gray-100 text-xs flex flex-col items-center justify-center ${
-                        weekend ? 'bg-gray-50' : ''
-                      } ${isToday ? 'bg-rose-50' : ''}`}
-                      style={{ width: DAY_WIDTH, height: HEADER_HEIGHT }}
+                      className={`flex-shrink-0 text-xs flex flex-col items-center justify-center ${
+                        weekend ? '' : ''
+                      }`}
+                      style={{
+                        width: DAY_WIDTH,
+                        height: HEADER_HEIGHT,
+                        backgroundColor: isToday ? '#EDBCDC' : 'transparent',
+                      }}
                     >
-                      <span className={`text-sm font-medium ${isToday ? 'text-rose-600' : 'text-gray-700'}`}>
+                      <span
+                        className="text-sm font-medium"
+                        style={{ color: '#111111' }}
+                      >
                         {format(d, 'd')}
                       </span>
-                      <span className="text-gray-400">{format(d, 'M月')}</span>
+                      <span style={{ color: '#111111' }}>{format(d, 'M月')}</span>
                     </div>
                   )
                 })}
@@ -107,28 +122,44 @@ export function GanttChart() {
                 : t.total_amount
                 ? (t.completed_amount / t.total_amount) * 100
                 : 0
+              const baseColor = cat?.color ?? '#94a3b8'
 
               return (
                 <div
                   key={t.id}
-                  className="flex border-b border-gray-100 hover:bg-gray-50 group"
+                  className="flex group"
                   style={{ height: ROW_HEIGHT }}
                 >
                   <button
                     onClick={() => navigate('/tasks')}
-                    className="w-[240px] flex-shrink-0 px-4 py-2 text-left border-r border-gray-200 bg-white group-hover:bg-gray-50 flex flex-col justify-center"
+                    className="w-[240px] flex-shrink-0 px-4 py-2 text-left flex flex-col justify-center"
+                    style={{ backgroundColor: '#FFFCF3' }}
                   >
-                    <div className="flex items-center gap-1 text-xs text-gray-500 mb-1">
+                    <div
+                      className="flex items-center gap-1 text-xs mb-1"
+                      style={{ color: '#111111' }}
+                    >
                       <span>{cat?.icon}</span>
                       <span className="truncate">{cat?.name}</span>
                       {isRecurring && (
-                        <span className="ml-1 px-1.5 py-0.5 rounded bg-pink-100 text-pink-700 text-[10px]">
+                        <span
+                          className="ml-1 px-1.5 py-0.5 rounded text-[10px]"
+                          style={{ backgroundColor: '#EDBCDC', color: '#111111' }}
+                        >
                           每日
                         </span>
                       )}
                     </div>
-                    <div className="text-sm font-medium text-gray-900 truncate">{t.name}</div>
-                    <div className="text-xs text-gray-500 mt-0.5 truncate">
+                    <div
+                      className="text-sm font-medium truncate"
+                      style={{ color: '#111111' }}
+                    >
+                      {t.name}
+                    </div>
+                    <div
+                      className="text-xs mt-0.5 truncate"
+                      style={{ color: '#111111' }}
+                    >
                       {isRecurring
                         ? `每天 ${t.daily_hours}h`
                         : t.total_amount
@@ -143,19 +174,26 @@ export function GanttChart() {
                       return isWeekend(d) ? (
                         <div
                           key={i}
-                          className="absolute top-0 bottom-0 bg-gray-50/50"
-                          style={{ left: i * DAY_WIDTH, width: DAY_WIDTH }}
+                          className="absolute top-0 bottom-0"
+                          style={{
+                            left: i * DAY_WIDTH,
+                            width: DAY_WIDTH,
+                            backgroundColor: 'rgba(0,0,0,0.03)',
+                          }}
                         />
                       ) : null
                     })}
                     {/* 今天竖线 */}
                     {todayOffset >= 0 && todayOffset < days && (
                       <div
-                        className="absolute top-0 bottom-0 w-px bg-blue-400 z-10"
-                        style={{ left: todayOffset * DAY_WIDTH + DAY_WIDTH / 2 }}
+                        className="absolute top-0 bottom-0 w-px z-10"
+                        style={{
+                          left: todayOffset * DAY_WIDTH + DAY_WIDTH / 2,
+                          backgroundColor: '#111111',
+                        }}
                       />
                     )}
-                    {/* 任务条 */}
+                    {/* 任务条：无边框，底色与进度色不同，降饱和 */}
                     <div
                       className="absolute rounded overflow-hidden flex items-center"
                       style={{
@@ -163,16 +201,20 @@ export function GanttChart() {
                         width: span * DAY_WIDTH - 4,
                         top: 14,
                         height: ROW_HEIGHT - 28,
-                        backgroundColor: `${cat?.color}30`,
-                        border: `1px solid ${cat?.color}`,
+                        backgroundColor: `${baseColor}33`,
                       }}
                     >
                       {isRecurring ? (
                         <div
                           className="h-full w-full flex items-center justify-center"
-                          style={{ backgroundColor: `${cat?.color}40` }}
+                          style={{
+                            backgroundColor: `${baseColor}66`,
+                          }}
                         >
-                          <span className="text-xs text-gray-800 font-medium">
+                          <span
+                            className="text-xs font-medium"
+                            style={{ color: '#111111' }}
+                          >
                             每天 {t.daily_hours}h
                           </span>
                         </div>
@@ -182,14 +224,20 @@ export function GanttChart() {
                             className="h-full flex items-center"
                             style={{
                               width: `${Math.min(100, progress)}%`,
-                              backgroundColor: cat?.color,
+                              backgroundColor: `color-mix(in srgb, ${baseColor} 50%, white)`,
                             }}
                           >
-                            <span className="text-xs text-white font-medium px-2 truncate">
+                            <span
+                              className="text-xs font-medium px-2 truncate"
+                              style={{ color: '#111111' }}
+                            >
                               {progress > 10 ? `${progress.toFixed(0)}%` : ''}
                             </span>
                           </div>
-                          <span className="absolute right-2 text-xs text-gray-700 px-1 truncate max-w-[140px]">
+                          <span
+                            className="absolute right-2 text-xs px-1 truncate max-w-[140px]"
+                            style={{ color: '#111111' }}
+                          >
                             {t.total_amount && t.total_amount - t.completed_amount > 0
                               ? `剩 ${(t.total_amount - t.completed_amount).toFixed(0)}${cat?.unit_label ?? ''}`
                               : t.total_amount && t.total_amount - t.completed_amount <= 0
@@ -207,9 +255,9 @@ export function GanttChart() {
         </div>
       )}
 
-      <div className="px-4 py-2 border-t border-gray-200 text-xs text-gray-500">
+      <div className="px-4 py-2 text-xs" style={{ color: '#111111' }}>
         起点：{format(startDate, 'yyyy-MM-dd')} · 终点：{format(endDate, 'yyyy-MM-dd')} · 共
-        {days} 天 · 蓝线 = 今天
+        {days} 天 · 黑色竖线 = 今天
       </div>
     </div>
   )

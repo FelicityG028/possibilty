@@ -3,19 +3,21 @@ import { Sidebar } from './Sidebar'
 
 export function AppShell({ children }: { children: ReactNode }) {
   return (
-    <div className="min-h-screen flex" style={{ backgroundColor: '#FAF4E8' }}>
-      <Sidebar />
-      <main className="flex-1 min-w-0 p-4">
+    <div className="min-h-screen p-4" style={{ backgroundColor: '#FAF4E8' }}>
+      <div
+        className="h-full min-h-[calc(100vh-2rem)] rounded-3xl flex overflow-hidden"
+        style={{ border: '2px solid #111111' }}
+      >
         <div
-          className="h-full rounded-3xl p-6 pb-2"
-          style={{
-            border: '2px solid #111111',
-            backgroundColor: 'transparent',
-          }}
+          className="rounded-2xl m-4 mr-0 w-60 flex-shrink-0 overflow-hidden"
+          style={{ backgroundColor: '#111111' }}
         >
-          {children}
+          <Sidebar />
         </div>
-      </main>
+        <main className="flex-1 min-w-0 p-6">
+          {children}
+        </main>
+      </div>
     </div>
   )
 }

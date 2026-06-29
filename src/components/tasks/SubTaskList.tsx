@@ -197,7 +197,10 @@ export function SubTaskList() {
                       </span>
                     )}
                   </div>
-                  <h3 className="font-medium truncate" style={{ color: '#111111' }}>
+                  <h3
+                    className="inline-block font-medium px-2.5 py-0.5 rounded truncate max-w-full"
+                    style={{ backgroundColor: '#111111', color: '#EDBCDC' }}
+                  >
                     {t.name}
                   </h3>
                   <div className="text-xs text-gray-500 mt-0.5">
