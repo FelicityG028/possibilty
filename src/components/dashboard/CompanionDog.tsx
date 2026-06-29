@@ -19,11 +19,7 @@ function pickDogEmoji(ratio: number, _hasTasks: boolean, hour: number): string {
   if (hour < 9) return '☀️'
   // 晚上 21-23
   if (hour >= 21) return '🌙'
-  // 进度低 → 加油小狗
-  if (ratio < 0.2) return '🐕'
-  // 进度高 → 兴奋小狗
-  if (ratio >= 0.8) return '🐕‍🦺'
-  return '🐶' // 默认
+  return '🐶' // 默认（含所有进度档位）
 }
 
 /**
