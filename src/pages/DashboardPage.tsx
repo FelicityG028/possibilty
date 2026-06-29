@@ -19,7 +19,8 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { Button } from '@/components/ui/Button'
 import { Link } from 'react-router-dom'
 import { format } from 'date-fns'
-import { getTodayProgress, getAggregateProjection } from '@/lib/dailyProgress'
+import { getTodayProgress, getAggregateProjection, getDayCompletion } from '@/lib/dailyProgress'
+import { CompanionDog } from '@/components/dashboard/CompanionDog'
 
 export function DashboardPage() {
   useDailyPlanSync()
@@ -45,6 +46,10 @@ export function DashboardPage() {
   // 汇总所有任务的预测
   const projection = getAggregateProjection(tasks, entries, today)
 
+  // 今日整体完成度（用于小狗）
+  const dayComp = getDayCompletion(today, tasks, entries)
+  const dayRatio = available > 0 ? dayComp.actual_hours / available : 0
+
   return (
     <div className="space-y-4">
       <div
@@ -64,6 +69,9 @@ export function DashboardPage() {
           <ViewSwitcher />
         </div>
       </div>
+
+      {/* 陪伴小狗 - 右下角浮动 */}
+      <CompanionDog ratio={dayRatio} hasTasks={todayEntries.length > 0} />
 
       {/* 按计划预测：当前是否能按时完成所有任务？ */}
       {projection.wontFinishCount > 0 && (
