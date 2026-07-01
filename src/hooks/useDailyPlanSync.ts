@@ -3,8 +3,10 @@
  *
  * 关键设计：
  * 1. 过去日期冻结（不动）
- * 2. ★ 今天锁定：今天的 plan 不被 user 进度影响
- * 3. 明天+动态：根据 user 当前进度调整
+ * 2. ★ 触发源区分：
+ *    - task 进度变化 → 锁定 today（user 今天的 plan 不变）
+ *    - daily_settings 变化 → 解锁 today（让 today 的 plan 跟着新可用时间调整）
+ * 3. 明天+根据 user 进度动态算
  * 4. 用 Supabase RPC（事务性 delete + upsert）
  * 5. 单例锁：防止并发 sync
  */
@@ -21,7 +23,9 @@ let syncing = false
 
 /**
  * 监听任务/设置变化，把 plan 写回 daily_plan_entries。
- * 关键：今天锁定，明天+重算。
+ * 关键：
+ *   - daily/defaultSetting 变化 → 完整 sync（覆盖 today + future）
+ *   - 只 tasks 变化 → 锁定 today（保留 user 已看到的今天的 plan）
  */
 export function useDailyPlanSync() {
   const { data: tasks = [] } = useSubTasks()
@@ -30,15 +34,37 @@ export function useDailyPlanSync() {
   const qc = useQueryClient()
   const ready = useRef(false)
 
+  // 跟踪前一次的值，判断这次变化来自哪里
+  const prevTasks = useRef(tasks)
+  const prevDaily = useRef(daily)
+  const prevDefault = useRef(defaultSetting)
+
   useEffect(() => {
     if (!ready.current) {
       const t = setTimeout(() => {
         ready.current = true
-        void syncPlan(tasks, daily, defaultSetting?.available_hours ?? 6, qc)
+        prevTasks.current = tasks
+        prevDaily.current = daily
+        prevDefault.current = defaultSetting
+        void syncPlan(tasks, daily, defaultSetting?.available_hours ?? 6, qc, false)
       }, 500)
       return () => clearTimeout(t)
     }
-    void syncPlan(tasks, daily, defaultSetting?.available_hours ?? 6, qc)
+
+    // 判断变化来源
+    const tasksChanged = prevTasks.current !== tasks
+    const dailyChanged =
+      prevDaily.current !== daily || prevDefault.current !== defaultSetting
+
+    prevTasks.current = tasks
+    prevDaily.current = daily
+    prevDefault.current = defaultSetting
+
+    // 规则：
+    //   - daily 变化 → 解锁 today（让今天的 plan 跟着新 available 调整）
+    //   - 只 task 变化 → 锁定 today
+    const lockToday = tasksChanged && !dailyChanged
+    void syncPlan(tasks, daily, defaultSetting?.available_hours ?? 6, qc, lockToday)
   }, [tasks, daily, defaultSetting, qc])
 }
 
@@ -46,12 +72,13 @@ async function syncPlan(
   tasks: SubTask[],
   daily: DailySetting[],
   defaultHours: number,
-  qc: ReturnType<typeof useQueryClient>
+  qc: ReturnType<typeof useQueryClient>,
+  lockToday: boolean
 ): Promise<void> {
   if (syncing) return
   syncing = true
   try {
-    await doSync(tasks, daily, defaultHours, qc)
+    await doSync(tasks, daily, defaultHours, qc, lockToday)
   } finally {
     syncing = false
   }
@@ -61,7 +88,8 @@ async function doSync(
   tasks: SubTask[],
   daily: DailySetting[],
   defaultHours: number,
-  qc: ReturnType<typeof useQueryClient>
+  qc: ReturnType<typeof useQueryClient>,
+  lockToday: boolean
 ): Promise<void> {
   const today = todayIso()
   const plan = generatePlan(tasks, daily, defaultHours, { startDate: today })
@@ -83,7 +111,6 @@ async function doSync(
     existingByKey.set(`${e.plan_date}|${e.sub_task_id}`, e as DailyPlanEntry)
   }
 
-  // ★ 关键拆分：今天的 plan 保留（不动），明天+的 plan 重算
   const newRows: Array<{
     plan_date: string
     sub_task_id: string
@@ -94,12 +121,11 @@ async function doSync(
   const keysToDelete: string[] = []
 
   for (const d of plan.dates) {
-    if (d === today) {
-      // 今天的 plan 完全保留（包括 planned_amount、actual_hours）
-      // 不动！
+    // ★ 锁定 today 时跳过（保留 user 已看到的今天的 plan）
+    if (d === today && lockToday) {
       continue
     }
-    // 明天+：用新算的 plan 覆盖
+
     const entriesForDate = plan.byDate[d].entries
     const newKeysForDate = new Set<string>()
 
@@ -116,7 +142,7 @@ async function doSync(
       })
     }
 
-    // 找出明天+的"过期" entries（新 plan 没有但 DB 有）→ 删
+    // 删除 DB 中有但新 plan 没有的 entries
     for (const e of existing ?? []) {
       if (e.plan_date !== d) continue
       const key = `${d}|${e.sub_task_id}`
@@ -126,7 +152,6 @@ async function doSync(
     }
   }
 
-  // 删除明天+的过期 entries
   if (keysToDelete.length > 0) {
     const { error: delErr } = await supabase
       .from('daily_plan_entries')
@@ -138,7 +163,6 @@ async function doSync(
     }
   }
 
-  // Upsert 明天+的新 plan
   if (newRows.length > 0) {
     const { data: rpcResult, error: rpcErr } = await supabase.rpc('sync_daily_plan', {
       p_entries: newRows,

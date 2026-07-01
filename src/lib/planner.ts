@@ -171,8 +171,7 @@ export function generatePlan(
     if (t.kind === 'finite') {
       if (!t.units_per_period || !t.period_hours || !t.total_amount) continue
       const rate = t.units_per_period / t.period_hours
-      // ★ 关键：plan 用 remaining 算（动态），明天的 plan 会根据 user 今天的进度调整
-      // 但今天的 plan 由 sync 跳过（保留 DB 中已有的 entry，不被覆盖）
+      // ★ 用 remaining 算（动态），sync 锁定今天不让覆盖
       const remaining = t.total_amount - t.completed_amount
       if (remaining <= 0) continue
       const hoursRemaining = remaining / rate
@@ -182,19 +181,21 @@ export function generatePlan(
       const deadlineDate = parseIso(t.deadline)
       const windowDays = daysBetween(startDate, deadlineDate)
       if (windowDays <= 0) continue
-      const dailyShare = hoursRemaining / windowDays
 
-      // 策略：先从截止日期倒着排（start as late as possible）
-      // 严格待在自己窗口内
+      // ★ 紧急任务优先算法：
+      //   - 任务按 deadline 升序排序后处理（B 先于 A）
+      //   - 每个任务填满自己窗口内所有 free 容量
+      //   - 不再 dailyShare 均分（避免不紧急任务占用最近几天）
+      //   - "靠后堆"或"前向铺"取决于窗口内 free 的位置
+      //   - 例：A 6h + DDL 20 + 6h/day，B 18h + DDL 3 →
+      //     B 先占 day 1-3 各 6h（共 18h），A 在 day 4-20 free 中逐天填
       let remainingHours = hoursRemaining
-      const descDates = dates
-        .filter((d) => parseIso(d) <= deadlineDate)
-        .reverse()
-      for (const d of descDates) {
+      const inWindowDates = dates.filter((d) => parseIso(d) <= deadlineDate)
+      for (const d of inWindowDates) {
         if (remainingHours <= 0) break
         const free = capacity.get(d) ?? 0
         if (free <= 0) continue
-        const alloc = Math.min(free, dailyShare, remainingHours)
+        const alloc = Math.min(free, remainingHours)
         if (alloc > 0.001) {
           entriesByDate[d].push({
             sub_task_id: t.id,
