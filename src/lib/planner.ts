@@ -166,65 +166,100 @@ export function generatePlan(
 
   let totalRemainingHours = 0
 
-  // 6. 调度每个任务
+  // 6. ★ 比例均分算法：所有任务一起算，按 dailyShare 比例分配
+  //   - 紧急任务（deadline 早）的 dailyShare 自然更高
+  //   - 同等紧急程度时（deadline 相同），按 dailyShare 比例同时完成
+  //   - 容量不够时按比例缩放
+  //   - 例：A 30h + B 20h + DDL 都 10 天 + 6h/day
+  //     dailyShare A=3, B=2, total=5 ≤ 6 → 每天都各填 3 和 2 → 10 天同时完成
+  //   - 例：A 6h + DDL 20 + B 18h + DDL 3
+  //     day 1-3: A dailyShare=0.3, B dailyShare=6, total=6.3 > 6, scale=0.95
+  //       A alloc 0.29, B alloc 5.71 → B 占满，B 不够的部分溢出
+  //     day 4+: A dailyShare 重新算 = 5.71/17 ≈ 0.34. A 占 day 4-20，每天 0.34h
+  //   - ★ 关键：B 紧急任务先分配（高 dailyShare），剩余给 A（低 dailyShare）
+
+  // 6a. 收集所有 active finite task 的 daily demand
+  const activeTasks: Array<{
+    task: SubTask
+    rate: number
+    remaining: number
+    hoursRemaining: number
+    deadlineDate: Date
+    windowDays: number
+    dailyShare: number // 每天需要的小时数
+  }> = []
+
   for (const t of sorted) {
-    if (t.kind === 'finite') {
-      if (!t.units_per_period || !t.period_hours || !t.total_amount) continue
-      const rate = t.units_per_period / t.period_hours
-      // ★ 用 remaining 算（动态），sync 锁定今天不让覆盖
-      const remaining = t.total_amount - t.completed_amount
-      if (remaining <= 0) continue
-      const hoursRemaining = remaining / rate
-      totalRemainingHours += hoursRemaining
-      if (!t.deadline) continue
+    if (t.kind !== 'finite') continue
+    if (!t.units_per_period || !t.period_hours || !t.total_amount) continue
+    if (!t.deadline) continue
+    const remaining = t.total_amount - t.completed_amount
+    if (remaining <= 0) continue
 
-      const deadlineDate = parseIso(t.deadline)
-      const windowDays = daysBetween(startDate, deadlineDate)
-      if (windowDays <= 0) continue
+    const rate = t.units_per_period / t.period_hours
+    const hoursRemaining = remaining / rate
+    const deadlineDate = parseIso(t.deadline)
+    const windowDays = daysBetween(startDate, deadlineDate)
+    if (windowDays <= 0) continue
 
-      // ★ 紧急任务优先算法：
-      //   - 任务按 deadline 升序排序后处理（B 先于 A）
-      //   - 每个任务填满自己窗口内所有 free 容量
-      //   - 不再 dailyShare 均分（避免不紧急任务占用最近几天）
-      //   - "靠后堆"或"前向铺"取决于窗口内 free 的位置
-      //   - 例：A 6h + DDL 20 + 6h/day，B 18h + DDL 3 →
-      //     B 先占 day 1-3 各 6h（共 18h），A 在 day 4-20 free 中逐天填
-      let remainingHours = hoursRemaining
-      const inWindowDates = dates.filter((d) => parseIso(d) <= deadlineDate)
-      for (const d of inWindowDates) {
-        if (remainingHours <= 0) break
-        const free = capacity.get(d) ?? 0
-        if (free <= 0) continue
-        const alloc = Math.min(free, remainingHours)
-        if (alloc > 0.001) {
-          entriesByDate[d].push({
-            sub_task_id: t.id,
-            planned_hours: alloc,
-            planned_amount: alloc * rate,
-          })
-          capacity.set(d, free - alloc)
-          remainingHours -= alloc
-        }
+    totalRemainingHours += hoursRemaining
+    activeTasks.push({
+      task: t,
+      rate,
+      remaining,
+      hoursRemaining,
+      deadlineDate,
+      windowDays,
+      dailyShare: hoursRemaining / windowDays,
+    })
+  }
+
+  // 6b. 对每天，分配所有在窗口内的 active tasks（按 dailyShare 比例）
+  for (const d of dates) {
+    const dayDate = parseIso(d)
+    const tasksForDay = activeTasks.filter((td) => dayDate <= td.deadlineDate)
+    if (tasksForDay.length === 0) continue
+
+    const totalDemand = tasksForDay.reduce((s, td) => s + td.dailyShare, 0)
+    const free = capacity.get(d) ?? 0
+    if (free <= 0) continue
+
+    // 按比例缩放（如果 demand > free）
+    const scale = totalDemand > free ? free / totalDemand : 1
+
+    for (const td of tasksForDay) {
+      const alloc = td.dailyShare * scale
+      if (alloc > 0.001) {
+        entriesByDate[d].push({
+          sub_task_id: td.task.id,
+          planned_hours: alloc,
+          planned_amount: alloc * td.rate,
+        })
+        capacity.set(d, (capacity.get(d) ?? 0) - alloc)
       }
-    } else if (t.kind === 'recurring') {
-      if (!t.daily_hours) continue
-      totalRemainingHours += t.daily_hours * dates.length
-      const endDateForRecurring = t.deadline ? parseIso(t.deadline) : endDate
-      for (const d of dates) {
-        const day = parseIso(d)
-        if (day < startDate) continue
-        if (day > endDateForRecurring) break
-        const free = capacity.get(d) ?? 0
-        if (free <= 0) continue
-        const alloc = Math.min(free, t.daily_hours)
-        if (alloc > 0.001) {
-          entriesByDate[d].push({
-            sub_task_id: t.id,
-            planned_hours: alloc,
-            planned_amount: 0,
-          })
-          capacity.set(d, free - alloc)
-        }
+    }
+  }
+
+  // 7. 每日任务（recurring）：每天固定时长
+  for (const t of sorted) {
+    if (t.kind !== 'recurring') continue
+    if (!t.daily_hours) continue
+    totalRemainingHours += t.daily_hours * dates.length
+    const endDateForRecurring = t.deadline ? parseIso(t.deadline) : endDate
+    for (const d of dates) {
+      const day = parseIso(d)
+      if (day < startDate) continue
+      if (day > endDateForRecurring) break
+      const free = capacity.get(d) ?? 0
+      if (free <= 0) continue
+      const alloc = Math.min(free, t.daily_hours)
+      if (alloc > 0.001) {
+        entriesByDate[d].push({
+          sub_task_id: t.id,
+          planned_hours: alloc,
+          planned_amount: 0,
+        })
+        capacity.set(d, free - alloc)
       }
     }
   }
