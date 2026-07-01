@@ -214,28 +214,37 @@ export function generatePlan(
     })
   }
 
-  // 6b. 对每天，分配所有在窗口内的 active tasks（按 dailyShare 比例）
-  for (const d of dates) {
-    const dayDate = parseIso(d)
-    const tasksForDay = activeTasks.filter((td) => dayDate <= td.deadlineDate)
-    if (tasksForDay.length === 0) continue
-
-    const totalDemand = tasksForDay.reduce((s, td) => s + td.dailyShare, 0)
-    const free = capacity.get(d) ?? 0
-    if (free <= 0) continue
-
-    // 按比例缩放（如果 demand > free）
-    const scale = totalDemand > free ? free / totalDemand : 1
-
-    for (const td of tasksForDay) {
-      const alloc = td.dailyShare * scale
+  // 6b. ★ 紧急任务优先 + 靠后堆算法
+  //   - 任务按 deadline 升序排序后处理（紧急的先）
+  //   - 每个任务在自己窗口内，**从最后一天倒着填**到第一天
+  //   - 每天 alloc = min(free, remaining)，最多占满 6-9h 不会极端
+  //   - 紧急任务先填满前期 days，不紧急任务被"挤"到后期
+  //   - 例：A 6h + DDL 20 + B 18h + DDL 3 + 6h/day
+  //     B 先：day 3 → 6h, day 2 → 6h, day 1 → 6h. 完成. day 1-3 占满
+  //     A 后：day 20 → 6h. 完成. A 在 day 20 (不挤占 7-14 之前)
+  //   - 例：A 30h + B 20h + DDL 都 10 + 6h/day
+  //     A 先（DDL 10）→ 装 30h 在 day 1-5
+  //     B 后 → 装 20h 在 day 6-10
+  //     都按时完成，但 A 集中在前期
+  //   - 关键修改：sort by deadline ASC，descDates reverse，alloc = min(free, remaining)
+  for (const td of activeTasks) {
+    let remaining = td.hoursRemaining
+    const descDates = dates
+      .filter((d) => parseIso(d) <= td.deadlineDate)
+      .reverse()
+    for (const d of descDates) {
+      if (remaining <= 0.001) break
+      const free = capacity.get(d) ?? 0
+      if (free <= 0) continue
+      const alloc = Math.min(free, remaining)
       if (alloc > 0.001) {
         entriesByDate[d].push({
           sub_task_id: td.task.id,
           planned_hours: alloc,
           planned_amount: alloc * td.rate,
         })
-        capacity.set(d, (capacity.get(d) ?? 0) - alloc)
+        capacity.set(d, free - alloc)
+        remaining -= alloc
       }
     }
   }
