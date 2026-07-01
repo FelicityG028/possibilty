@@ -9,17 +9,12 @@ interface CompanionDogProps {
 }
 
 /**
- * 根据时间和完成度选 emoji
+ * 选 emoji — 统一用 🐶
+ * 完成度 100% 时短暂显示 🎉 庆祝
  */
-function pickDogEmoji(ratio: number, _hasTasks: boolean, hour: number): string {
+function pickDogEmoji(ratio: number): string {
   if (ratio >= 1) return '🎉' // 完成 → 庆祝
-  // 深夜/清晨 23-5 → 困
-  if (hour >= 23 || hour < 5) return '😴'
-  // 早晨 5-9
-  if (hour < 9) return '☀️'
-  // 晚上 21-23
-  if (hour >= 21) return '🌙'
-  return '🐶' // 默认（含所有进度档位）
+  return '🐶'
 }
 
 /**
@@ -92,8 +87,7 @@ export function CompanionDog({ ratio, hasTasks }: CompanionDogProps) {
     setTimeout(() => setClicked(false), 600)
   }
 
-  const hour = new Date().getHours()
-  const normalEmoji = pickDogEmoji(ratio, hasTasks, hour)
+  const normalEmoji = pickDogEmoji(ratio)
   const displayEmoji = clicked ? '🐕‍🦺' : normalEmoji
 
   return (

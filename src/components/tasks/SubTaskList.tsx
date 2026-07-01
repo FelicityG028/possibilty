@@ -33,7 +33,7 @@ export function SubTaskList() {
 
   const [editing, setEditing] = useState<SubTask | null>(null)
   const [formOpen, setFormOpen] = useState(false)
-  const [showArchived, setShowArchived] = useState(false)
+  const [showArchived, setShowArchived] = useState(true)
 
   const catMap = new Map(categories.map((c) => [c.id, c]))
   const active = tasks.filter((t) => t.status !== 'completed')

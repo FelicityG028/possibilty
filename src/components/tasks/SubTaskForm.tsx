@@ -306,14 +306,14 @@ export function SubTaskForm({ open, onClose, editing }: SubTaskFormProps) {
                   required
                 />
                 <Input
-                  label="耗时（小时）"
+                  label="耗时（小时，允许小数）"
                   name="hours"
                   type="number"
-                  step="1"
-                  min="1"
+                  step="0.1"
+                  min="0.1"
                   value={hours}
                   onChange={(e) => setHours(e.target.value)}
-                  placeholder="2"
+                  placeholder="0.5"
                   required
                 />
               </div>
@@ -327,15 +327,15 @@ export function SubTaskForm({ open, onClose, editing }: SubTaskFormProps) {
             </p>
             <div className="grid grid-cols-2 gap-3">
               <Input
-                label="时长（小时/天）"
+                label="时长（小时/天，允许小数）"
                 name="dailyHours"
                 type="number"
-                step="1"
-                min="1"
+                step="0.1"
+                min="0.1"
                 max="24"
                 value={dailyHours}
                 onChange={(e) => setDailyHours(e.target.value)}
-                placeholder="1"
+                placeholder="0.5"
                 required
               />
               <Input

@@ -12,7 +12,7 @@ import {
   useDailySettings,
   useDefaultSetting,
 } from '@/hooks/useDailySettings'
-import { getTodayProgress } from '@/lib/dailyProgress'
+import { getTodayProgress, getDayCompletion } from '@/lib/dailyProgress'
 
 interface DayDetailDrawerProps {
   date: string
@@ -36,6 +36,10 @@ export function DayDetailDrawer({ date, onClose }: DayDetailDrawerProps) {
   const available = getAvailableHoursForDate(settings, defaultSetting?.available_hours, date)
   const totalPlanned = dayEntries.reduce((s, e) => s + e.planned_hours, 0)
   const overflow = totalPlanned - available
+
+  // 当天已完成小时（从 plan 中各任务的 actual 累加）
+  const dayComp = getDayCompletion(date, tasks, entries)
+  const dayActual = dayComp.actual_hours
 
   async function setActualAmount(taskId: string, amount: number) {
     const task = taskMap.get(taskId)
@@ -194,6 +198,28 @@ export function DayDetailDrawer({ date, onClose }: DayDetailDrawerProps) {
             </div>
           )}
         </div>
+
+        {/* 底部完成进度条（fixed 底部） */}
+        <div
+          className="px-5 py-3 border-t flex items-center gap-3"
+          style={{ borderColor: 'rgba(0,0,0,0.1)' }}
+        >
+          <span className="text-xs font-medium" style={{ color: '#111111' }}>
+            今日完成
+          </span>
+          <div className="flex-1 h-2 rounded-full overflow-hidden" style={{ backgroundColor: '#EEE8DC' }}>
+            <div
+              className="h-full transition-all"
+              style={{
+                width: `${Math.min(100, totalPlanned > 0 ? (dayActual / totalPlanned) * 100 : 0)}%`,
+                backgroundColor: dayActual > totalPlanned ? '#10b981' : '#BBCAE7',
+              }}
+            />
+          </div>
+          <span className="text-xs tabular-nums whitespace-nowrap" style={{ color: '#111111' }}>
+            <b>{dayActual.toFixed(1)}</b> / {totalPlanned.toFixed(1)}h
+          </span>
+        </div>
       </div>
       {showOverflow && (
         <OverflowDialog
@@ -245,11 +271,11 @@ function ActualStepper({
       setDraft(value.toFixed(1))
       return
     }
-    const clamped = Math.min(max, v)
-    if (Math.abs(clamped - value) < 0.05) return
+    // 不再截断到 max，允许超额完成（如 15/10 表达今日超常发挥）
+    if (Math.abs(v - value) < 0.05) return
     setSaving(true)
     try {
-      await onChange(clamped)
+      await onChange(v)
     } finally {
       setSaving(false)
     }
@@ -278,7 +304,6 @@ function ActualStepper({
           type="number"
           step="1"
           min="0"
-          max={max}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onBlur={() => void commit()}

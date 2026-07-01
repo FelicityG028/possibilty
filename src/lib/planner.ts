@@ -171,6 +171,8 @@ export function generatePlan(
     if (t.kind === 'finite') {
       if (!t.units_per_period || !t.period_hours || !t.total_amount) continue
       const rate = t.units_per_period / t.period_hours
+      // ★ 关键：plan 用 remaining 算（动态），明天的 plan 会根据 user 今天的进度调整
+      // 但今天的 plan 由 sync 跳过（保留 DB 中已有的 entry，不被覆盖）
       const remaining = t.total_amount - t.completed_amount
       if (remaining <= 0) continue
       const hoursRemaining = remaining / rate
@@ -182,10 +184,8 @@ export function generatePlan(
       if (windowDays <= 0) continue
       const dailyShare = hoursRemaining / windowDays
 
-      // ★ 修复：跟踪本任务已分配的日期，避免 fallback 重复 push
-      const usedDates = new Set<string>()
-
       // 策略：先从截止日期倒着排（start as late as possible）
+      // 严格待在自己窗口内
       let remainingHours = hoursRemaining
       const descDates = dates
         .filter((d) => parseIso(d) <= deadlineDate)
@@ -202,31 +202,7 @@ export function generatePlan(
             planned_amount: alloc * rate,
           })
           capacity.set(d, free - alloc)
-          usedDates.add(d)
           remainingHours -= alloc
-        }
-      }
-
-      // 如果还有剩余（早期日期被占满），向前找
-      // ★ 关键：跳过 usedDates，避免重复
-      if (remainingHours > 0.01) {
-        for (const d of dates) {
-          if (remainingHours <= 0) break
-          if (parseIso(d) > deadlineDate) break
-          if (usedDates.has(d)) continue
-          const free = capacity.get(d) ?? 0
-          if (free <= 0) continue
-          const alloc = Math.min(free, remainingHours)
-          if (alloc > 0.001) {
-            entriesByDate[d].push({
-              sub_task_id: t.id,
-              planned_hours: alloc,
-              planned_amount: alloc * rate,
-            })
-            capacity.set(d, free - alloc)
-            usedDates.add(d)
-            remainingHours -= alloc
-          }
         }
       }
     } else if (t.kind === 'recurring') {

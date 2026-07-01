@@ -153,10 +153,14 @@ export function getProjectedCompletion(
     .reduce((s, e) => s + e.planned_hours, 0)
 
   const projectedFromPlan = futurePlannedHours * rate
-  const projected = Math.min(total, completed + projectedFromPlan)
-  const delta = Math.max(0, total - projected)
-  const ratio = Math.min(1, projected / total)
-  const willFinish = projected >= total
+  const rawProjected = Math.min(total, completed + projectedFromPlan)
+  // ★ 修复：用 0.5 单位精度判断，避免 9.99/10 误报
+  const projected = rawProjected
+  const delta = total - rawProjected
+  // delta < 0.5 视为完成
+  const roundedDelta = delta < 0.5 ? 0 : Math.round(delta * 10) / 10
+  const ratio = Math.min(1, rawProjected / total)
+  const willFinish = roundedDelta === 0
 
   // 截止日还剩多少天（含今天和截止日）
   const todayDate = parseIsoDate(today)
@@ -171,7 +175,7 @@ export function getProjectedCompletion(
 
   return {
     projected,
-    delta,
+    delta: roundedDelta,
     ratio,
     willFinish,
     requiredDailyHours,

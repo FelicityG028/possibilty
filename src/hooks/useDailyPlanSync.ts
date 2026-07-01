@@ -2,9 +2,11 @@
  * 把规划引擎的输出同步到 daily_plan_entries 表。
  *
  * 关键设计：
- * 1. 只同步今天及未来日期（过去日期冻结）
- * 2. 用 Supabase RPC（事务性 delete + upsert），避免 409/500
- * 3. 单例锁：防止并发 sync
+ * 1. 过去日期冻结（不动）
+ * 2. ★ 今天锁定：今天的 plan 不被 user 进度影响
+ * 3. 明天+动态：根据 user 当前进度调整
+ * 4. 用 Supabase RPC（事务性 delete + upsert）
+ * 5. 单例锁：防止并发 sync
  */
 import { useEffect, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
@@ -19,7 +21,7 @@ let syncing = false
 
 /**
  * 监听任务/设置变化，把 plan 写回 daily_plan_entries。
- * 关键：过去日期冻结，今天和未来日期重算。
+ * 关键：今天锁定，明天+重算。
  */
 export function useDailyPlanSync() {
   const { data: tasks = [] } = useSubTasks()
@@ -65,27 +67,23 @@ async function doSync(
   const plan = generatePlan(tasks, daily, defaultHours, { startDate: today })
   if (plan.dates.length === 0) return
 
-  // ★ 关键：只同步今天及未来日期，过去日期不动
-  const futureDates = plan.dates.filter((d) => d >= today)
-  if (futureDates.length === 0) return
-
-  // 1. 抓取已有 entries（用于保留 actual_hours）
+  // 抓取所有 today+future entries
   const { data: existing, error: existingErr } = await supabase
     .from('daily_plan_entries')
     .select('*')
-    .in('plan_date', futureDates)
+    .in('plan_date', plan.dates)
   if (existingErr) {
     // eslint-disable-next-line no-console
     console.error('[syncPlan] fetch existing failed:', existingErr)
     return
   }
 
-  // 2. 构建新行（保留旧 actual_hours）
   const existingByKey = new Map<string, DailyPlanEntry>()
   for (const e of existing ?? []) {
     existingByKey.set(`${e.plan_date}|${e.sub_task_id}`, e as DailyPlanEntry)
   }
 
+  // ★ 关键拆分：今天的 plan 保留（不动），明天+的 plan 重算
   const newRows: Array<{
     plan_date: string
     sub_task_id: string
@@ -93,9 +91,21 @@ async function doSync(
     planned_hours: number
     actual_hours: number | null
   }> = []
-  for (const d of futureDates) {
-    for (const e of plan.byDate[d].entries) {
+  const keysToDelete: string[] = []
+
+  for (const d of plan.dates) {
+    if (d === today) {
+      // 今天的 plan 完全保留（包括 planned_amount、actual_hours）
+      // 不动！
+      continue
+    }
+    // 明天+：用新算的 plan 覆盖
+    const entriesForDate = plan.byDate[d].entries
+    const newKeysForDate = new Set<string>()
+
+    for (const e of entriesForDate) {
       const key = `${d}|${e.sub_task_id}`
+      newKeysForDate.add(key)
       const old = existingByKey.get(key)
       newRows.push({
         plan_date: d,
@@ -105,20 +115,43 @@ async function doSync(
         actual_hours: old?.actual_hours ?? null,
       })
     }
+
+    // 找出明天+的"过期" entries（新 plan 没有但 DB 有）→ 删
+    for (const e of existing ?? []) {
+      if (e.plan_date !== d) continue
+      const key = `${d}|${e.sub_task_id}`
+      if (!newKeysForDate.has(key) && e.id) {
+        keysToDelete.push(e.id)
+      }
+    }
   }
 
-  // 3. 用 RPC 一次性完成：删除过期 + upsert 新数据（事务内）
-  const { data: rpcResult, error: rpcErr } = await supabase.rpc('sync_daily_plan', {
-    p_entries: newRows,
-    p_delete_from: today,
-  })
-  if (rpcErr) {
-    // eslint-disable-next-line no-console
-    console.error('[syncPlan] RPC failed:', rpcErr)
-    return
+  // 删除明天+的过期 entries
+  if (keysToDelete.length > 0) {
+    const { error: delErr } = await supabase
+      .from('daily_plan_entries')
+      .delete()
+      .in('id', keysToDelete)
+    if (delErr) {
+      // eslint-disable-next-line no-console
+      console.error('[syncPlan] delete failed:', delErr)
+    }
   }
-  // eslint-disable-next-line no-console
-  console.log('[syncPlan] OK', rpcResult)
+
+  // Upsert 明天+的新 plan
+  if (newRows.length > 0) {
+    const { data: rpcResult, error: rpcErr } = await supabase.rpc('sync_daily_plan', {
+      p_entries: newRows,
+      p_delete_from: today,
+    })
+    if (rpcErr) {
+      // eslint-disable-next-line no-console
+      console.error('[syncPlan] RPC failed:', rpcErr)
+      return
+    }
+    // eslint-disable-next-line no-console
+    console.log('[syncPlan] OK', rpcResult)
+  }
 
   qc.invalidateQueries({ queryKey: ['daily_plan'] })
 }
