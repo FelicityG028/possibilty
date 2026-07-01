@@ -120,6 +120,7 @@ export function MonthCalendar() {
           const stats = dayStats[iso]
           const hours = stats?.hours ?? 0
           const available = getAvailableHoursForDate(settings, defaultSetting?.available_hours, iso)
+          const isRestDay = available === 0
           const overflow = hours > available
           const taskCount = stats?.tasks.size ?? 0
 
@@ -147,8 +148,13 @@ export function MonthCalendar() {
               style={{
                 borderRight: '1.5px dashed #111111',
                 borderBottom: '1.5px dashed #111111',
-                backgroundColor: 'transparent',
+                backgroundColor: isRestDay
+                  ? 'rgba(237, 188, 220, 0.15)'
+                  : isToday
+                  ? '#EDBCDC'
+                  : 'transparent',
               }}
+              title={isRestDay ? '休息日（点击设定学习时间）' : ''}
             >
               <div className="flex items-center justify-between">
                 <span
@@ -161,9 +167,16 @@ export function MonthCalendar() {
                 >
                   {format(day, 'd')}
                 </span>
-                {overflow && (
+                {isRestDay ? (
+                  <span
+                    className="text-[10px] px-1 rounded"
+                    style={{ backgroundColor: '#EDBCDC', color: '#111111' }}
+                  >
+                    休
+                  </span>
+                ) : overflow ? (
                   <span className="text-orange-500 text-xs" title="加班">⚠️</span>
-                )}
+                ) : null}
               </div>
               {taskCount > 0 && (
                 <div className="mt-1 space-y-0.5">

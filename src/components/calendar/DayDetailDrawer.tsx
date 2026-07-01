@@ -13,6 +13,7 @@ import {
   useDefaultSetting,
 } from '@/hooks/useDailySettings'
 import { getTodayProgress, getDayCompletion } from '@/lib/dailyProgress'
+import { DailyHoursEditor } from './DailyHoursEditor'
 
 interface DayDetailDrawerProps {
   date: string
@@ -68,6 +69,8 @@ export function DayDetailDrawer({ date, onClose }: DayDetailDrawerProps) {
     }
   }
 
+  const isRestDay = available === 0
+
   return (
     <>
       <div className="fixed inset-0 z-40 bg-black/20" onClick={onClose} />
@@ -76,6 +79,14 @@ export function DayDetailDrawer({ date, onClose }: DayDetailDrawerProps) {
           <div>
             <h2 className="text-lg font-semibold text-gray-900">
               {format(new Date(date), 'yyyy年M月d日')}
+              {isRestDay && (
+                <span
+                  className="ml-2 text-xs px-2 py-0.5 rounded"
+                  style={{ backgroundColor: '#EDBCDC', color: '#111111' }}
+                >
+                  休息日
+                </span>
+              )}
             </h2>
             <p className="text-sm text-gray-500 mt-0.5">
               计划 {totalPlanned.toFixed(1)}h / 可用 {available}h
@@ -88,6 +99,17 @@ export function DayDetailDrawer({ date, onClose }: DayDetailDrawerProps) {
           >
             ✕
           </button>
+        </div>
+
+        {/* 设定今日学习时间（0 = 休息日） */}
+        <div
+          className="px-5 py-2 flex items-center justify-between"
+          style={{ borderBottom: '1.5px dashed #111111' }}
+        >
+          <span className="text-xs" style={{ color: '#111111' }}>
+            设定学习时间（0 = 休息日）
+          </span>
+          <DailyHoursEditor date={date} />
         </div>
 
         {overflow > 0 && (
