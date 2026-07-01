@@ -214,42 +214,79 @@ export function generatePlan(
     })
   }
 
-  // 6b. ★ "按 dailyShare 比例 + 紧急任务优先"算法
-//   - 任务按 deadline ASC 排序后处理（紧急的先）
-//   - 每天对所有 in-window task 按 dailyShare 比例分配
-//   - 总 demand > free 时按比例缩放（紧急任务 dailyShare 大，被缩放少）
-//   - 紧急任务自然占大头，不紧急任务在小头
-//   - 每天都有任务，不会出现"靠后堆"的空 days
-//   - 例：A 30h + B 20h + DDL 都 10 + 9h/day
-//     dailyShare A=3, B=2, total=5 ≤ 9 → 每天 A=3, B=2 同时完成 day 10
-//   - 例：A 6h + DDL 20 + B 18h + DDL 3 + 6h/day
-//     A dailyShare=0.3, B dailyShare=6
-//     day 1-3: B 占大头 (5.4), A 占小头 (0.27) → day 1-3 主要 B
-//     day 4-20: A 占 0.3/day → A 装在 7-01+ 后续 days, 不挤占紧急
-for (const d of dates) {
-  const dayDate = parseIso(d)
-  // 紧急任务先排（deadline ASC）
-  const tasksForDay = activeTasks
-    .filter((td) => dayDate <= td.deadlineDate)
-    .sort((a, b) => a.deadlineDate.getTime() - b.deadlineDate.getTime())
-  if (tasksForDay.length === 0) continue
+  // 6b. ★ "紧急任务优先 + 不挤占"算法
+//   - 任务按 deadline ASC 排序
+//   - urgent 任务 (dailyShare > 1) 先装在自己窗口
+//   - 收集 urgent 任务装过的 days = "urgent days"
+//   - non-urgent 任务 (dailyShare ≤ 1) 跳过 urgent days，装在剩余 free days
+//   - 能完成所有任务 → 装得下就装完
+//   - 装不下 → overflow（在 UI 上显示差额）
+//   - 例：文学史 5.32/day 装 7-01 to 7-14，cap 接近 0
+//     政治 0.67/day 跳过 7-01 to 7-14，装 7-15+
+//     测试 0.5/day 跳过 7-01 to 7-14（虽然小，但需要"自己的空间"）
+//     但如果测试也按不 urgent 跳过，它永远没地方装 → 装不满
+//   - 折中: 不 urgent 任务也装，但跳过 "被 urgent 占满的 days" (cap < 它的 dailyShare * 0.5)
 
-  const totalDemand = tasksForDay.reduce((s, td) => s + td.dailyShare, 0)
-  const free = capacity.get(d) ?? 0
-  if (free <= 0) continue
+const URGENT_THRESHOLD = 1 // dailyShare > 1 视为紧急任务
 
-  // 按比例缩放（如果 demand > free）
-  const scale = totalDemand > free ? free / totalDemand : 1
+// 第一步: 紧急任务按 dailyShare 装
+const urgentTasks = activeTasks.filter((td) => td.dailyShare > URGENT_THRESHOLD)
+const nonUrgentTasks = activeTasks.filter((td) => td.dailyShare <= URGENT_THRESHOLD)
 
-  for (const td of tasksForDay) {
-    const alloc = td.dailyShare * scale
+// 先装 urgent 任务
+for (const td of urgentTasks) {
+  let remaining = td.hoursRemaining
+  const inWindow = dates.filter((d) => parseIso(d) <= td.deadlineDate)
+  for (const d of inWindow) {
+    if (remaining <= 0.001) break
+    const free = capacity.get(d) ?? 0
+    if (free <= 0) continue
+    const alloc = Math.min(free, td.dailyShare, remaining)
     if (alloc > 0.001) {
       entriesByDate[d].push({
         sub_task_id: td.task.id,
         planned_hours: alloc,
         planned_amount: alloc * td.rate,
       })
-      capacity.set(d, (capacity.get(d) ?? 0) - alloc)
+      capacity.set(d, free - alloc)
+      remaining -= alloc
+    }
+  }
+}
+
+// 收集 urgent 任务装过的 days
+const urgentDays = new Set<string>()
+for (const d of dates) {
+  if (entriesByDate[d].length > 0) {
+    // 检查这个 day 的 entry 是否来自 urgent 任务
+    const hasUrgent = entriesByDate[d].some((e) => {
+      const t = activeTasks.find((td) => td.task.id === e.sub_task_id)
+      return t ? t.dailyShare > URGENT_THRESHOLD : false
+    })
+    if (hasUrgent) urgentDays.add(d)
+  }
+}
+
+// 第二步: non-urgent 任务跳过 urgent days
+// 但如果 non-urgent 任务的窗口小，urgent days 少，可能装得下
+for (const td of nonUrgentTasks) {
+  let remaining = td.hoursRemaining
+  const inWindow = dates.filter((d) => parseIso(d) <= td.deadlineDate)
+  for (const d of inWindow) {
+    if (remaining <= 0.001) break
+    // 跳过被 urgent 占用的 days
+    if (urgentDays.has(d)) continue
+    const free = capacity.get(d) ?? 0
+    if (free <= 0) continue
+    const alloc = Math.min(free, td.dailyShare, remaining)
+    if (alloc > 0.001) {
+      entriesByDate[d].push({
+        sub_task_id: td.task.id,
+        planned_hours: alloc,
+        planned_amount: alloc * td.rate,
+      })
+      capacity.set(d, free - alloc)
+      remaining -= alloc
     }
   }
 }
