@@ -268,17 +268,24 @@ for (const d of dates) {
 }
 
 // 第二步: non-urgent 任务跳过 urgent days
-// 但如果 non-urgent 任务的窗口小，urgent days 少，可能装得下
+// ★ 关键修复: dailyShare 按"实际可装 days"算，不按整个 window
+// 例: 政治 window 52 天，但 urgent 占 20 天，剩 32 天
+//     hoursRemaining 34.17 / 32 = 1.07h/天 (不是 0.67h/天)
+//     32 天 × 1.07h = 34.24h，能装完
 for (const td of nonUrgentTasks) {
-  let remaining = td.hoursRemaining
   const inWindow = dates.filter((d) => parseIso(d) <= td.deadlineDate)
-  for (const d of inWindow) {
+  // 实际可装 days = 自己 window - 被 urgent 占用的 days
+  const availableDates = inWindow.filter((d) => !urgentDays.has(d))
+  if (availableDates.length === 0) continue
+  // 动态 dailyShare
+  const effectiveDailyShare = td.hoursRemaining / availableDates.length
+
+  let remaining = td.hoursRemaining
+  for (const d of availableDates) {
     if (remaining <= 0.001) break
-    // 跳过被 urgent 占用的 days
-    if (urgentDays.has(d)) continue
     const free = capacity.get(d) ?? 0
     if (free <= 0) continue
-    const alloc = Math.min(free, td.dailyShare, remaining)
+    const alloc = Math.min(free, effectiveDailyShare, remaining)
     if (alloc > 0.001) {
       entriesByDate[d].push({
         sub_task_id: td.task.id,
