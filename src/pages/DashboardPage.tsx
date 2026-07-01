@@ -14,6 +14,7 @@ import { MonthCalendar } from '@/components/calendar/MonthCalendar'
 import { GanttChart } from '@/components/gantt/GanttChart'
 import { ViewSwitcher } from '@/components/layout/ViewSwitcher'
 import { DailyHoursEditor } from '@/components/calendar/DailyHoursEditor'
+import { SyncStatusBar } from '@/components/dashboard/SyncStatusBar'
 import { ProgressBar } from '@/components/ui/ProgressBar'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Button } from '@/components/ui/Button'
@@ -52,6 +53,7 @@ export function DashboardPage() {
 
   return (
     <div className="space-y-4">
+      <SyncStatusBar />
       <div
         className="flex items-center justify-between flex-wrap gap-2 px-4 py-2 rounded-2xl"
         style={{ border: '1px solid #111111' }}

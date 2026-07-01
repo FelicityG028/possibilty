@@ -1,0 +1,235 @@
+{
+  "workflow": {
+    "name": "任务排程助手",
+    "version": "1.0.0",
+    "description": "无状态任务排程智能体。用户每次对话输入任务列表，智能体解析后排程并输出",
+    "start_node_id": "node_start",
+    "nodes": [
+      {
+        "id": "node_start",
+        "type": "开始节点",
+        "name": "开始",
+        "description": "接收用户消息和历史对话",
+        "output_params": [
+          { "name": "user_message", "type": "string", "required": true, "description": "用户当前消息" },
+          { "name": "history", "type": "array", "required": false, "default": [], "description": "历史对话" },
+          { "name": "today", "type": "string", "required": true, "description": "当前日期 YYYY-MM-DD" }
+        ]
+      },
+      {
+        "id": "node_intent",
+        "type": "意图分类节点",
+        "name": "意图识别",
+        "description": "判断用户消息的意图",
+        "input_params": [
+          { "name": "input", "type": "string", "value": "{{user_message}}" }
+        ],
+        "categories": [
+          { "id": "list_tasks", "name": "列出任务", "description": "用户描述或列出学习任务" },
+          { "id": "report_complete", "name": "报完成", "description": "用户说自己完成了多少" },
+          { "id": "change_hours", "name": "改时间", "description": "用户说修改每天学习时间" },
+          { "id": "check_progress", "name": "查进度", "description": "用户问能不能完成/还差多少" },
+          { "id": "replan", "name": "重排", "description": "用户要求重新排程" },
+          { "id": "other", "name": "其他", "description": "闲聊、咨询、问候" }
+        ],
+        "classification_prompt": "你是一个意图分类器。根据用户的输入，输出最匹配的意图。\n\n可选类别：\n- 列出任务：用户描述或列出学习任务\n- 报完成：用户说自己完成了多少\n- 改时间：用户说修改每天学习时间\n- 查进度：用户问能不能完成/还差多少\n- 重排：用户要求重新排程\n- 其他：闲聊、咨询、问候",
+        "output_param": {
+          "name": "intent",
+          "type": "string"
+        }
+      },
+      {
+        "id": "node_selector",
+        "type": "选择器节点",
+        "name": "意图路由",
+        "description": "根据意图分类结果分发",
+        "input_param": "{{intent}}",
+        "cases": [
+          { "condition": "{{intent}} == '列出任务'", "next_node": "node_parse_tasks" },
+          { "condition": "{{intent}} == '报完成'", "next_node": "node_complete" },
+          { "condition": "{{intent}} == '改时间'", "next_node": "node_change_hours" },
+          { "condition": "{{intent}} == '查进度'", "next_node": "node_check_progress" },
+          { "condition": "{{intent}} == '重排'", "next_node": "node_replan" },
+          { "condition": "default", "next_node": "node_default" }
+        ]
+      },
+
+      {
+        "id": "node_parse_tasks",
+        "type": "大模型节点",
+        "name": "任务解析",
+        "description": "把自然语言描述的任务列表解析成标准格式",
+        "model": "gpt-4",
+        "temperature": 0,
+        "max_tokens": 2000,
+        "system_prompt": "你是一个任务解析器。把用户用自然语言描述的任务列表解析成标准 JSON 格式。",
+        "user_prompt": "用户输入：{{user_message}}\n历史对话：{{history}}\n\n解析规则：\n- \"看 X N 节，1 hour/节，DDL\" → type:finite, total:N, rate:\"1 h/节\", deadline:DDL\n- \"背单词 每天 30 分钟\" → type:recurring, daily_hours:0.5\n- \"刷题 200 道 0.5 h/10 道 9-15 截止\" → type:finite, total:200, rate:\"0.05 h/道\", deadline:\"2026-09-15\"\n- 每天能学 X 小时 → daily_hours:X\n\n输出 JSON：\n{\n  \"tasks\": [\n    {\"name\": \"\", \"category\": \"看书/看网课/刷题/背单词/其他\", \"type\": \"finite|recurring\", \"total\": 0, \"rate\": \"\", \"deadline\": \"YYYY-MM-DD\", \"daily_hours\": 0}\n  ],\n  \"daily_hours\": 0\n}",
+        "input_params": [
+          { "name": "parsed", "type": "object" }
+        ]
+      },
+      {
+        "id": "node_schedule",
+        "type": "大模型节点",
+        "name": "排程计算",
+        "description": "基于任务和每天学习时间生成每天安排",
+        "model": "gpt-4",
+        "temperature": 0,
+        "max_tokens": 3000,
+        "system_prompt": "你是一个排程引擎。基于用户任务和每天学习时间生成每天安排。",
+        "user_prompt": "任务列表：{{parsed.tasks}}\n每天学习时间：{{parsed.daily_hours}}h\n当前日期：{{today}}\n\n排程算法：\n1. 紧急任务（截止日早）先排\n2. 每个任务从自己窗口的最后一天开始，填满每天直到装完\n3. 不紧急任务等紧急任务完成后，从剩余 days 开始\n4. 每天总量不能超过 daily_hours\n5. 装得下就装完，装不下显示差额\n\n输出 Markdown：\n\n## 我的任务\n| 任务 | 进度 | 截止 |\n|------|------|------|\n\n## 排程\n| 日期 | 任务 | 时长 |\n|------|------|------|\n\n## 提醒\n- 完成度：X%\n- 警告：XX 任务在 deadline 前还差 N 单位（如果存在）",
+        "input_params": [
+          { "name": "schedule_md", "type": "string" }
+        ]
+      },
+      {
+        "id": "node_output_schedule",
+        "type": "输出节点",
+        "name": "输出排程结果",
+        "content": "{{schedule_md}}",
+        "format": "markdown"
+      },
+
+      {
+        "id": "node_complete",
+        "type": "大模型节点",
+        "name": "报完成",
+        "description": "用户报完成时更新进度并重排",
+        "model": "gpt-4",
+        "temperature": 0,
+        "max_tokens": 2000,
+        "system_prompt": "你是一个完成度跟踪器。用户说完成了多少，更新对应任务的进度。",
+        "user_prompt": "任务列表：{{parsed.tasks}}\n用户报完成：{{user_message}}\n每天学习时间：{{parsed.daily_hours}}h\n当前日期：{{today}}\n\n输出 Markdown：\n\n## 更新进度\n| 任务 | 之前 | 现在 | 还差 |\n|------|------|------|------|\n\n## 新排程\n| 日期 | 任务 | 时长 |\n\n## 提醒\n- 完成度：X%\n- 今天：已完成 Yh / 计划 Zh",
+        "input_params": [
+          { "name": "complete_md", "type": "string" }
+        ]
+      },
+      {
+        "id": "node_output_complete",
+        "type": "输出节点",
+        "name": "输出完成更新",
+        "content": "{{complete_md}}",
+        "format": "markdown"
+      },
+
+      {
+        "id": "node_change_hours",
+        "type": "大模型节点",
+        "name": "改时间",
+        "description": "用户修改每天学习时间后重排",
+        "model": "gpt-4",
+        "temperature": 0,
+        "max_tokens": 2000,
+        "system_prompt": "你是一个排程调整器。用户改了每天学习时间，重新排程。",
+        "user_prompt": "任务列表：{{parsed.tasks}}\n新每天学习时间：{{new_hours}}h\n当前日期：{{today}}\n\n输出 Markdown：\n\n## 新排程（每天 {{new_hours}} 小时）\n| 日期 | 任务 | 时长 |\n\n## 提醒\n- 完成度：X%",
+        "input_params": [
+          { "name": "change_md", "type": "string" }
+        ]
+      },
+      {
+        "id": "node_output_change",
+        "type": "输出节点",
+        "name": "输出新排程",
+        "content": "{{change_md}}",
+        "format": "markdown"
+      },
+
+      {
+        "id": "node_check_progress",
+        "type": "大模型节点",
+        "name": "查进度",
+        "description": "告诉用户按当前计划能否按时完成",
+        "model": "gpt-4",
+        "temperature": 0,
+        "max_tokens": 2000,
+        "system_prompt": "你是一个完成度分析师。告诉用户按当前计划能否按时完成。",
+        "user_prompt": "任务列表：{{parsed.tasks}}\n每天学习时间：{{parsed.daily_hours}}h\n当前日期：{{today}}\n\n输出 Markdown：\n\n## 当前进度\n| 任务 | 已完成 | 总数 | 进度 | 截止 | 状态 |\n|------|--------|------|------|------|------|\n\n## 总结\n- 7-1 之前能完成：X / Y 个任务\n- 总差额：N 单位\n- 建议：每天多学 M 小时",
+        "input_params": [
+          { "name": "check_md", "type": "string" }
+        ]
+      },
+      {
+        "id": "node_output_check",
+        "type": "输出节点",
+        "name": "输出进度检查",
+        "content": "{{check_md}}",
+        "format": "markdown"
+      },
+
+      {
+        "id": "node_replan",
+        "type": "大模型节点",
+        "name": "重排所有",
+        "description": "强制重新排程所有任务",
+        "model": "gpt-4",
+        "temperature": 0,
+        "max_tokens": 3000,
+        "system_prompt": "你是一个排程引擎。重新计算所有任务的安排。",
+        "user_prompt": "任务列表：{{parsed.tasks}}\n每天学习时间：{{parsed.daily_hours}}h\n当前日期：{{today}}\n\n使用跟\"列出任务\"一样的算法重新排程，输出 Markdown。",
+        "input_params": [
+          { "name": "replan_md", "type": "string" }
+        ]
+      },
+      {
+        "id": "node_output_replan",
+        "type": "输出节点",
+        "name": "输出重排",
+        "content": "{{replan_md}}",
+        "format": "markdown"
+      },
+
+      {
+        "id": "node_default",
+        "type": "大模型节点",
+        "name": "默认回复",
+        "description": "闲聊或不知道怎么分类时的兜底回复",
+        "model": "gpt-4",
+        "temperature": 0.7,
+        "max_tokens": 200,
+        "system_prompt": "你是\"学习排程助手\"。\n\n用户没说具体任务，只是闲聊或问\"怎么用\"。\n\n任务：\n- 友好地回应\n- 引导用户提供任务信息\n- 简短（不超过 50 字）",
+        "user_prompt": "用户：{{user_message}}\n\n示例回复（用户问\"怎么用\"）：\n\"先告诉我你的任务和截止日，比如'政治 35 节 1h/节 8-20 截止'，再告诉我每天能学几小时，我就帮你排程。\"",
+        "input_params": [
+          { "name": "reply", "type": "string" }
+        ]
+      },
+      {
+        "id": "node_output_default",
+        "type": "输出节点",
+        "name": "输出默认回复",
+        "content": "{{reply}}",
+        "format": "text"
+      }
+    ],
+    "edges": [
+      { "from": "node_start", "to": "node_intent" },
+      { "from": "node_intent", "to": "node_selector" },
+      { "from": "node_selector", "to": "node_parse_tasks", "condition": "intent == '列出任务'" },
+      { "from": "node_selector", "to": "node_complete", "condition": "intent == '报完成'" },
+      { "from": "node_selector", "to": "node_change_hours", "condition": "intent == '改时间'" },
+      { "from": "node_selector", "to": "node_check_progress", "condition": "intent == '查进度'" },
+      { "from": "node_selector", "to": "node_replan", "condition": "intent == '重排'" },
+      { "from": "node_selector", "to": "node_default", "condition": "intent == '其他'" },
+
+      { "from": "node_parse_tasks", "to": "node_schedule" },
+      { "from": "node_schedule", "to": "node_output_schedule" },
+
+      { "from": "node_complete", "to": "node_output_complete" },
+      { "from": "node_change_hours", "to": "node_output_change" },
+      { "from": "node_check_progress", "to": "node_output_check" },
+      { "from": "node_replan", "to": "node_output_replan" },
+      { "from": "node_default", "to": "node_output_default" }
+    ],
+    "state_variables": [
+      { "name": "today", "type": "string", "description": "当前日期 YYYY-MM-DD" },
+      { "name": "daily_hours", "type": "number", "default": 6, "description": "每天学习时间" },
+      { "name": "new_hours", "type": "number", "description": "新每天学习时间（改时间时用）" },
+      { "name": "tasks", "type": "array", "description": "任务列表" }
+    ],
+    "global_settings": {
+      "max_tokens_default": 2000,
+      "temperature_default": 0.3,
+      "timeout_seconds": 30,
+      "retry_count": 2
+    }
+  }
+}
