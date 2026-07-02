@@ -1,11 +1,14 @@
 /**
  * 把规划引擎的输出同步到 daily_plan_entries 表。
  *
- * v2: AI Agent 集成
- *   - 优先调后端 /api/agent 端点（Vite proxy 或 Cloudflare Pages Function）
- *   - 后端构造 prompt + 调 OpenAI，避免 API key 暴露到前端
- *   - 失败时 fallback 到写死算法（generatePlan）
+ * v3: 纯写死算法
+ *   - sync 只用 generatePlan（planner.ts）
+ *   - AI 调整是独立功能（AIAdjustBox），不影响基线 sync
+ *   - 失败回退：写死算法失败 → 静默忽略
  *   - 单例锁：防止并发 sync
+ *
+ * v2 历史：曾尝试 AI agent 生成 plan，但不稳定（输出格式错）。
+ *     AI 已改为"调整 plan"模式（AIAdjustBox），sync 保持纯写死。
  */
 import { useEffect, useRef, useSyncExternalStore } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
@@ -14,12 +17,6 @@ import { useSubTasks } from './useSubTasks'
 import { useDailySettings, useDefaultSetting } from './useDailySettings'
 import { useCategories } from './useCategories'
 import { generatePlan, todayIso } from '@/lib/planner'
-import {
-  toAgentTasks,
-  toDailyHoursMap,
-  collectTodayEntries,
-  type AgentOutput,
-} from '@/lib/plannerAgent'
 import type { SubTask, DailySetting, DailyPlanEntry, Category } from '@/lib/types'
 
 // 模块级锁：防止并发 sync
@@ -29,14 +26,10 @@ let syncing = false
 const syncListeners = new Set<() => void>()
 let syncState: {
   isRunning: boolean
-  mode: 'idle' | 'agent' | 'fallback'
   lastError: string | null
-  lastReasoning: string | null
 } = {
   isRunning: false,
-  mode: 'idle',
   lastError: null,
-  lastReasoning: null,
 }
 
 function setSyncState(patch: Partial<typeof syncState>) {
@@ -62,14 +55,12 @@ export function useSyncStatus() {
   )
 }
 
-const FORWARD_DAYS = 90 // Agent 只规划未来 90 天
-
 /**
  * 监听任务/设置变化，把 plan 写回 daily_plan_entries。
  * 关键：
  *   - daily/defaultSetting 变化 → 解锁 today
  *   - 只 tasks 变化 → 锁定 today
- *   - 默认尝试 AI agent，失败 fallback 到写死算法
+ *   - 完全用写死算法（generatePlan），无 AI 介入
  */
 export function useDailyPlanSync() {
   const { data: tasks = [] } = useSubTasks()
@@ -119,7 +110,7 @@ interface NewRow {
 async function syncPlan(
   tasks: SubTask[],
   daily: DailySetting[],
-  categories: Category[],
+  _categories: Category[],
   defaultHours: number,
   qc: ReturnType<typeof useQueryClient>,
   lockToday: boolean
@@ -127,7 +118,7 @@ async function syncPlan(
   if (syncing) return
   syncing = true
   try {
-    await doSync(tasks, daily, categories, defaultHours, qc, lockToday)
+    await doSync(tasks, daily, defaultHours, qc, lockToday)
   } finally {
     syncing = false
   }
@@ -136,13 +127,12 @@ async function syncPlan(
 async function doSync(
   tasks: SubTask[],
   daily: DailySetting[],
-  categories: Category[],
   defaultHours: number,
   qc: ReturnType<typeof useQueryClient>,
   lockToday: boolean
 ): Promise<void> {
   const today = todayIso()
-  setSyncState({ isRunning: true, mode: 'agent', lastError: null })
+  setSyncState({ isRunning: true, lastError: null })
 
   // 抓取所有 today+future entries
   const { data: allExisting } = await supabase
@@ -155,55 +145,27 @@ async function doSync(
   for (const e of (allExisting ?? []) as DailyPlanEntry[]) {
     existingByKey.set(`${e.plan_date}|${e.sub_task_id}`, e)
   }
-  const todayEntries = collectTodayEntries(
-    (allExisting ?? []) as DailyPlanEntry[],
-    today
-  )
 
-  // 尝试 AI agent
-  let newRows: NewRow[] = []
-  let lastReasoning: string | null = null
+  // 写死算法生成 plan
+  const plan = generatePlan(tasks, daily, defaultHours, { startDate: today })
+  if (plan.dates.length === 0) {
+    setSyncState({ isRunning: false })
+    return
+  }
 
-  try {
-    const categoryMap = new Map(categories.map((c) => [c.id, c.name]))
-    const agentTasks = toAgentTasks(tasks, categoryMap)
-    if (agentTasks.length > 0) {
-      const dailyHours = toDailyHoursMap(daily, defaultHours, today, FORWARD_DAYS)
-      const output = await callAgent({
-        today,
-        dailyHours,
-        defaultHours,
-        tasks: agentTasks,
-        existingToday: todayEntries,
-      })
-      newRows = output.entries.map((e) => ({
-        plan_date: e.plan_date,
+  const newRows: NewRow[] = []
+  for (const d of plan.dates) {
+    if (d === today && lockToday) continue
+    for (const e of plan.byDate[d].entries) {
+      const old = existingByKey.get(`${d}|${e.sub_task_id}`)
+      newRows.push({
+        plan_date: d,
         sub_task_id: e.sub_task_id,
         planned_amount: e.planned_amount,
         planned_hours: e.planned_hours,
-        actual_hours:
-          existingByKey.get(`${e.plan_date}|${e.sub_task_id}`)
-            ?.actual_hours ?? null,
-      }))
-      lastReasoning = output.reasoning
-      setSyncState({ mode: 'agent', lastReasoning })
-    } else {
-      setSyncState({ mode: 'agent', lastReasoning: '无 active 任务' })
+        actual_hours: old?.actual_hours ?? null,
+      })
     }
-  } catch (err) {
-    console.warn('[syncPlan] Agent failed, falling back:', err)
-    setSyncState({
-      mode: 'fallback',
-      lastError: err instanceof Error ? err.message : String(err),
-    })
-    newRows = buildFromHardcoded(
-      tasks,
-      daily,
-      defaultHours,
-      today,
-      existingByKey,
-      lockToday
-    )
   }
 
   // 删除"过期" entries（DB 有但新 plan 没有）
@@ -232,91 +194,4 @@ async function doSync(
 
   qc.invalidateQueries({ queryKey: ['daily_plan'] })
   setSyncState({ isRunning: false })
-}
-
-/**
- * 调后端 /api/agent 端点
- * 后端构造 prompt + 调 OpenAI
- */
-async function callAgent(
-  input: Parameters<typeof toAgentTasks>[1] extends never
-    ? any
-    : any
-): Promise<AgentOutput> {
-  const resp = await fetch('/api/agent', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(input),
-  })
-
-  if (!resp.ok) {
-    const errText = await resp.text()
-    throw new Error(`Agent API ${resp.status}: ${errText.slice(0, 200)}`)
-  }
-
-  // /api/agent 把 dashscope 的完整响应原样返回
-  // 格式：{ choices: [{ message: { content: "..." } }] }
-  const wrapper = await resp.json()
-  console.log('[callAgent] dashscope wrapper:', JSON.stringify(wrapper).slice(0, 500))
-
-  // 提取 content
-  const content = wrapper?.choices?.[0]?.message?.content
-  if (typeof content !== 'string') {
-    throw new Error(`dashscope response missing content: ${JSON.stringify(wrapper).slice(0, 300)}`)
-  }
-
-  // 解析 content（可能包含 markdown 包裹）
-  const jsonText = content
-    .replace(/^```(?:json)?\s*/i, '')
-    .replace(/\s*```\s*$/, '')
-    .trim()
-  console.log('[callAgent] extracted JSON:', jsonText.slice(0, 500))
-
-  let raw: any
-  try {
-    raw = JSON.parse(jsonText)
-  } catch (e) {
-    throw new Error(`Failed to parse JSON: ${content.slice(0, 200)}`)
-  }
-
-  if (!raw || typeof raw !== 'object') {
-    throw new Error(`Bad response shape: ${JSON.stringify(raw).slice(0, 200)}`)
-  }
-  if (!Array.isArray(raw.entries)) {
-    throw new Error(
-      `Missing entries field. Got keys: ${Object.keys(raw).join(', ')}. First 200 chars: ${JSON.stringify(raw).slice(0, 200)}`
-    )
-  }
-  return raw as AgentOutput
-}
-
-/**
- * Fallback: 用写死算法
- */
-function buildFromHardcoded(
-  tasks: SubTask[],
-  daily: DailySetting[],
-  defaultHours: number,
-  today: string,
-  existingByKey: Map<string, DailyPlanEntry>,
-  lockToday: boolean
-): NewRow[] {
-  const plan = generatePlan(tasks, daily, defaultHours, { startDate: today })
-  if (plan.dates.length === 0) return []
-
-  const newRows: NewRow[] = []
-  for (const d of plan.dates) {
-    if (d === today && lockToday) continue
-    for (const e of plan.byDate[d].entries) {
-      const old = existingByKey.get(`${d}|${e.sub_task_id}`)
-      newRows.push({
-        plan_date: d,
-        sub_task_id: e.sub_task_id,
-        planned_amount: e.planned_amount,
-        planned_hours: e.planned_hours,
-        actual_hours: old?.actual_hours ?? null,
-      })
-    }
-  }
-  return newRows
 }
