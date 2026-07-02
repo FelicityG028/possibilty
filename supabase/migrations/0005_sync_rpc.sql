@@ -29,6 +29,7 @@ BEGIN
 
   -- 2. Upsert 新的 entries（事务内）
   --    先对 (plan_date, sub_task_id) 去重 + 合并，避免 21000 错误
+  --    支持 is_user_adjusted / adjustment_id（v0.3+ 持久化 AI 调整用）
   WITH aggregated AS (
     SELECT
       plan_date,
@@ -36,25 +37,36 @@ BEGIN
       SUM(planned_amount) AS planned_amount,
       SUM(planned_hours)  AS planned_hours,
       -- actual_hours 取非 null 的值（前端会传相同的）
-      (array_agg(actual_hours) FILTER (WHERE actual_hours IS NOT NULL))[1] AS actual_hours
+      (array_agg(actual_hours) FILTER (WHERE actual_hours IS NOT NULL))[1] AS actual_hours,
+      -- is_user_adjusted：任一 entry 标记 true 则视为调整过
+      COALESCE(bool_or((e->>'is_user_adjusted')::boolean), FALSE) AS is_user_adjusted,
+      -- adjustment_id：取任一非空的（同一组 entries 应该用同一个 id）
+      (array_agg(e->>'adjustment_id') FILTER (WHERE e->>'adjustment_id' IS NOT NULL))[1] AS adjustment_id
     FROM (
       SELECT
         (e->>'plan_date')::date        AS plan_date,
         (e->>'sub_task_id')::uuid      AS sub_task_id,
         (e->>'planned_amount')::numeric AS planned_amount,
         (e->>'planned_hours')::numeric  AS planned_hours,
-        (e->>'actual_hours')::numeric    AS actual_hours
+        (e->>'actual_hours')::numeric    AS actual_hours,
+        (e->>'is_user_adjusted')::boolean AS is_user_adjusted,
+        e->>'adjustment_id'              AS adjustment_id
       FROM jsonb_array_elements(p_entries) AS e
     ) raw
     GROUP BY plan_date, sub_task_id
   )
-  INSERT INTO public.daily_plan_entries (plan_date, sub_task_id, planned_amount, planned_hours, actual_hours)
-  SELECT plan_date, sub_task_id, planned_amount, planned_hours, actual_hours
+  INSERT INTO public.daily_plan_entries
+    (plan_date, sub_task_id, planned_amount, planned_hours, actual_hours, is_user_adjusted, adjustment_id)
+  SELECT plan_date, sub_task_id, planned_amount, planned_hours, actual_hours, is_user_adjusted, adjustment_id
   FROM aggregated
   ON CONFLICT (plan_date, sub_task_id) DO UPDATE SET
     planned_amount = EXCLUDED.planned_amount,
     planned_hours  = EXCLUDED.planned_hours,
-    actual_hours   = COALESCE(EXCLUDED.actual_hours, public.daily_plan_entries.actual_hours);
+    actual_hours   = COALESCE(EXCLUDED.actual_hours, public.daily_plan_entries.actual_hours),
+    -- is_user_adjusted 同步（新的是 true 就 true；新是 false 保持旧值；防止 sync 把用户调整覆盖掉）
+    is_user_adjusted = public.daily_plan_entries.is_user_adjusted OR EXCLUDED.is_user_adjusted,
+    -- adjustment_id 同步
+    adjustment_id = COALESCE(EXCLUDED.adjustment_id, public.daily_plan_entries.adjustment_id);
   GET DIAGNOSTICS v_upserted = ROW_COUNT;
 
   RETURN QUERY SELECT v_deleted, v_upserted;

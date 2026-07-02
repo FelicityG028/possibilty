@@ -168,11 +168,32 @@ async function doSync(
     }
   }
 
-  // 删除"过期" entries（DB 有但新 plan 没有）
+  // ★ 关键：跳过用户调整过的 entries（不被新 plan 覆盖）
+  // 把"老的调整 entry"重新加进 newRows（保留旧值，不被 generatePlan 覆盖）
+  const adjustedEntries = new Set<string>()
+  for (const e of (allExisting ?? []) as DailyPlanEntry[]) {
+    if (e.is_user_adjusted && e.id) {
+      const key = `${e.plan_date}|${e.sub_task_id}`
+      if (!newRows.some((r) => `${r.plan_date}|${r.sub_task_id}` === key)) {
+        // generatePlan 没产出这个 entry（被新算法改了），保留旧的
+        newRows.push({
+          plan_date: e.plan_date,
+          sub_task_id: e.sub_task_id,
+          planned_amount: e.planned_amount,
+          planned_hours: e.planned_hours,
+          actual_hours: e.actual_hours ?? null,
+        })
+        adjustedEntries.add(key)
+      }
+    }
+  }
+
+  // 删除"过期" entries（DB 有但新 plan 没有，且不是调整过的）
   const newKeys = new Set(newRows.map((r) => `${r.plan_date}|${r.sub_task_id}`))
   const keysToDelete: string[] = []
   for (const e of (allExisting ?? []) as DailyPlanEntry[]) {
     if (e.plan_date === today && lockToday) continue
+    if (e.is_user_adjusted) continue // 调整过的永不删
     if (!newKeys.has(`${e.plan_date}|${e.sub_task_id}`) && e.id) {
       keysToDelete.push(e.id)
     }

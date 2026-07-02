@@ -96,8 +96,8 @@ export function AIAdjustBox() {
         throw new Error(`Missing actions: ${jsonText.slice(0, 200)}`)
       }
 
-      // 应用 actions 到 daily_plan_entries
-      await applyToDb(output.actions, today)
+      // 应用 actions 到 daily_plan_entries（持久化：标 is_user_adjusted）
+      await applyToDb(output.actions, today, request, output.reasoning || '')
 
       setLastResult({ actions: output.actions, reasoning: output.reasoning || '' })
       setRequest('')
@@ -110,7 +110,37 @@ export function AIAdjustBox() {
     }
   }
 
-  async function applyToDb(actions: AdjustmentAction[], today: string) {
+  /**
+   * 清除所有 AI 调整：删 adjustment_logs + 删对应 is_user_adjusted entries
+   * sync 会重算这些 days
+   */
+  async function clearAllAdjustments() {
+    if (!confirm('清除所有 AI 调整？这会让 sync 用基线算法重排所有你之前调过的 days。')) return
+    setIsLoading(true)
+    setError(null)
+    try {
+      // 删 is_user_adjusted = true 的 entries
+      await supabase
+        .from('daily_plan_entries')
+        .delete()
+        .eq('is_user_adjusted', true)
+      // 删 logs
+      await supabase.from('adjustment_logs').delete().neq('id', '00000000-0000-0000-0000-000000000000')
+      setLastResult({ actions: [], reasoning: '已清除所有调整，下次 sync 用基线算法重算' })
+      qc.invalidateQueries({ queryKey: ['daily_plan'] })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  async function applyToDb(
+    actions: AdjustmentAction[],
+    today: string,
+    userRequest: string,
+    reasoning: string
+  ) {
     // set_daily_hours actions 单独处理
     for (const a of actions) {
       if (a.type === 'set_daily_hours') {
@@ -121,16 +151,53 @@ export function AIAdjustBox() {
     // 其他 actions 应用到 daily_plan_entries
     const newEntries = applyActions(entries, actions)
 
-    // 删除今天及未来的旧 entries
-    await supabase
-      .from('daily_plan_entries')
-      .delete()
-      .gte('plan_date', today)
+    // 创建一个 adjustment_log 记录这次调整
+    const affectedDates = Array.from(
+      new Set(actions.flatMap((a) => {
+        if (a.type === 'swap') return [a.from_date, a.to_date]
+        if (a.type === 'add' || a.type === 'remove') return [a.date]
+        return []
+      }))
+    )
 
-    // 写入新 entries
-    if (newEntries.length > 0) {
+    const { data: log } = await supabase
+      .from('adjustment_logs')
+      .insert({
+        user_request: userRequest,
+        reasoning,
+        actions: actions as unknown,
+        affected_dates: affectedDates,
+      })
+      .select('id')
+      .single()
+
+    const adjustmentId = log?.id
+
+    // 标记 is_user_adjusted = true + adjustment_id
+    const tagged = newEntries.map((e) => ({
+      ...e,
+      is_user_adjusted: true,
+      adjustment_id: adjustmentId,
+    }))
+
+    // 删除今天及未来的旧 entries（但保留其他 adjustment 的）
+    // 这里用 delete_by_actual_date，只删"非 is_user_adjusted + 不在 affected_dates"
+    // 简化：只删今天以后"非 is_user_adjusted"的 entries
+    const { data: oldNonAdjusted } = await supabase
+      .from('daily_plan_entries')
+      .select('id, plan_date, sub_task_id')
+      .gte('plan_date', today)
+      .eq('is_user_adjusted', false)
+
+    if (oldNonAdjusted && oldNonAdjusted.length > 0) {
+      const oldIds = oldNonAdjusted.map((e) => e.id)
+      await supabase.from('daily_plan_entries').delete().in('id', oldIds)
+    }
+
+    // 写入新 entries（带 adjustment 标记）
+    if (tagged.length > 0) {
       await supabase.rpc('sync_daily_plan', {
-        p_entries: newEntries,
+        p_entries: tagged,
         p_delete_from: today,
       })
     }
@@ -171,6 +238,18 @@ export function AIAdjustBox() {
         <Button onClick={handleAdjust} disabled={isLoading || !request.trim()}>
           {isLoading ? '调整中…' : '调整'}
         </Button>
+      </div>
+
+      <div className="mt-1 text-right">
+        <button
+          type="button"
+          onClick={clearAllAdjustments}
+          disabled={isLoading}
+          className="text-xs underline"
+          style={{ color: '#666' }}
+        >
+          清除所有 AI 调整（重置为基线）
+        </button>
       </div>
 
       {error && (

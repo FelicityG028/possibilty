@@ -274,11 +274,11 @@ export function generatePlan(
     if (totalRemaining > 0) {
       for (const td of activeTasks) {
         const used = taskUsed.get(td.task.id) ?? 0
-        const taskRemaining = Math.max(0, td.hoursRemaining - used)
-        if (taskRemaining <= 0) continue
+        const taskRemainingRef = { value: Math.max(0, td.hoursRemaining - used) }
+        if (taskRemainingRef.value <= 0) continue
         const cap = td.dailyShare * 1.5 // 单 task bonus 上限
-        const wantBonus = (taskRemaining / totalRemaining) * bonusPool
-        const bonus = Math.min(wantBonus, cap, taskRemaining)
+        const wantBonus = (taskRemainingRef.value / totalRemaining) * bonusPool
+        let bonus = Math.min(wantBonus, cap, taskRemainingRef.value)
         if (bonus > 0.001) {
           // 装 bonus：按 task.remaining 大小，优先填 urgent days（后 deadline 优先）
           const sortedDates = dates
@@ -288,7 +288,7 @@ export function generatePlan(
             if (bonus <= 0.001) break
             const free = capacity.get(d) ?? 0
             if (free <= 0) continue
-            const alloc = Math.min(free, bonus, taskRemaining)
+            const alloc = Math.min(free, bonus, taskRemainingRef.value)
             if (alloc > 0.001) {
               entriesByDate[d].push({
                 sub_task_id: td.task.id,
@@ -297,7 +297,7 @@ export function generatePlan(
               })
               capacity.set(d, free - alloc)
               bonus -= alloc
-              taskRemaining -= alloc
+              taskRemainingRef.value -= alloc
             }
           }
         }
