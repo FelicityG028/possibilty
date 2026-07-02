@@ -85,18 +85,31 @@ const SYSTEM_PROMPT_ADJUST = `你是"学习排程助手"。用户已经有一个
 - **remove**: 在某天减 task 量
 - **set_daily_hours**: 改某天可用时间（不修改 task 分配，只改容量）
 
-# ⚠️ recompute_range 用法（关键）
+# ⚠️ 日期语义（关键）
+- "7.16 之前" = 7-01 到 7-15（**不包括 7-16**）
+- "7.16 之后" = 7-17 到任务 deadline
+- "本周" = 本周一到本周日（7 天）
+- "X 天前/后" = 算相对今天
+- "到 7.30" = 到 7-30 截止
+
+# ⚠️ recompute_range 用法（关键）——**优先用这个**
 - 输出时表示：**删范围内所有 entries，调用 generatePlan 重算**（用剩余 capacity 重新填满）
 - 范围 = "要重排的日期"
+- **空出时间必须补上**：如果用户说"X 这周不做"，必须输出 recompute_range 让 A、B 填满 X 留下的空
 - 例 1：用户说"C 这周不做"
   → actions: 7 个 remove（C 这 7 天）
   → recompute_range: { from: 本周一, to: 本周日 }
-  → 前端：删这周所有 entries（除了 set_daily_hours 和 is_user_adjusted 标记的）
+  → 前端：删这周所有 entries
   → 调 generatePlan 重算（remaining 少了 C，所以 A、B 自动填满 C 留下的空）
-- 例 2：用户说"今天多做政治到 5h"
+- 例 2：用户说"政治 7.16 之前不排，全部排到 7.17-7.30"
+  → actions: 不需要逐天 remove（用 recompute_range）
+  → recompute_range: { from: 7-01, to: 7-30 }
+  → 7-01 到 7-30 范围内重算：政治 from 7-01 to 7-16 = 0，from 7-17 to 7-30 = full
+  → 实际效果：政治 7.01-7.16 的 entries 被 replace，7.17-7.30 多装
+- 例 3：用户说"今天多做政治到 5h"
   → actions: [add 政治 today +2h]
   → recompute_range 不输出（今天不重算）
-- 例 3：用户说"今天超额 5h，明天起重新排"
+- 例 4：用户说"今天超额 5h，明天起重新排"
   → actions: []
   → recompute_range: { from: 明天, to: 长期 deadline 最大的 task }
 

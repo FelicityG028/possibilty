@@ -138,10 +138,15 @@ async function applyAdjustments(args: {
 
   // 7. 写入新 entries（带 adjustment 标记）
   if (tagged.length > 0) {
-    await supabase.rpc('sync_daily_plan', {
+    const { error: rpcErr } = await supabase.rpc('sync_daily_plan', {
       p_entries: tagged,
       p_delete_from: today,
     })
+    if (rpcErr) {
+      console.error('[AIAdjust] RPC FAILED:', rpcErr)
+    }
+  } else {
+    console.warn('[AIAdjust] WARNING: tagged is empty, nothing to write')
   }
 }
 
