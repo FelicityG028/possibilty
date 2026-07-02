@@ -79,6 +79,13 @@ export type AdjustmentAction =
 export interface AdjustmentOutput {
   actions: AdjustmentAction[]
   reasoning: string
+  /**
+   * 重排范围：AI 输出后，删范围内所有 entries，调用 generatePlan 重算
+   * - 例：用户说"C 这周不做" → recompute_range: { from: 本周一, to: 本周日 }
+   *   删除本周所有 entries，generatePlan 重算（A、B 自动填满 C 留下的空）
+   * - 不输出则只应用 actions（不重排）
+   */
+  recompute_range?: { from: string; to: string }
 }
 
 // --------------------------------------------------------------------------
@@ -183,7 +190,7 @@ export function collectTodayEntries(
 }
 
 // --------------------------------------------------------------------------
-// 应用 actions 到 daily_plan_entries
+// 应用 adjustments 到 daily_plan_entries
 // --------------------------------------------------------------------------
 
 /**
@@ -268,4 +275,12 @@ export function applyActions(
   }
 
   return Array.from(map.values())
+}
+
+// --------------------------------------------------------------------------
+// 辅助：判断 entries 是否在范围内
+// --------------------------------------------------------------------------
+
+export function isInRange(date: string, from: string, to: string): boolean {
+  return date >= from && date <= to
 }

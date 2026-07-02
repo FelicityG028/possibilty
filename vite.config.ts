@@ -108,6 +108,7 @@ const SYSTEM_PROMPT_ADJUST = `你是"学习排程助手"。用户已经有一个
     { "type": "remove", "date": "YYYY-MM-DD", "sub_task_id": "uuid", "planned_amount_delta": 0, "planned_hours_delta": 0 },
     { "type": "set_daily_hours", "date": "YYYY-MM-DD", "hours": 0 }
   ],
+  "recompute_range": { "from": "YYYY-MM-DD", "to": "YYYY-MM-DD" },
   "reasoning": "1-2 句话解释"
 }
 
@@ -117,12 +118,28 @@ const SYSTEM_PROMPT_ADJUST = `你是"学习排程助手"。用户已经有一个
 - **remove**: 在某天减 task 量
 - **set_daily_hours**: 改某天可用时间（不修改 task 分配，只改容量）
 
+# ⚠️ recompute_range 用法（关键）
+- 输出时表示：**删范围内所有 entries，调用 generatePlan 重算**（用剩余 capacity 重新填满）
+- 范围 = "要重排的日期"
+- 例 1：用户说"C 这周不做"
+  → actions: 7 个 remove（C 这 7 天）
+  → recompute_range: { from: 本周一, to: 本周日 }
+  → 前端：删这周所有 entries（除了 set_daily_hours 和 is_user_adjusted 标记的）
+  → 调 generatePlan 重算（remaining 少了 C，所以 A、B 自动填满 C 留下的空）
+- 例 2：用户说"今天多做政治到 5h"
+  → actions: [add 政治 today +2h]
+  → recompute_range 不输出（今天不重算）
+- 例 3：用户说"今天超额 5h，明天起重新排"
+  → actions: []
+  → recompute_range: { from: 明天, to: 长期 deadline 最大的 task }
+
 # 调整原则
 1. **优先用 swap**：把紧急 task 从 deadline 远的 days 移到 deadline 紧的 days
 2. **每天总量不能超过 dailyHours[date]**：调整后总 hours ≤ 当天容量
 3. **今天的 plan 也可调整**：如果用户明确说"今天"，可动今天
 4. **保持任务完成量 = total**：swap/add/remove 之后所有天数总量应保持不变
 5. **minimize changes**：用最少的 actions 完成用户需求
+6. **如果调整让某范围"空出时间"**：输出 recompute_range 让算法自动重排填满
 
 # 计算 hint
 - rate = units_per_period / period_hours（如 25/1 = 25 单位/h）
