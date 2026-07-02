@@ -65,6 +65,15 @@ function parseIso(iso: string): Date {
   return new Date(y, m - 1, d)
 }
 
+/**
+ * 把日期字符串转成当天 23:59:59 本地时间
+ * 避免 daysBetween / dateRange 因为 0:00 边界进位到下一天
+ */
+function parseIsoEndOfDay(iso: string): Date {
+  const [y, m, d] = iso.split('-').map(Number)
+  return new Date(y, m - 1, d, 23, 59, 59)
+}
+
 export function toIso(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
@@ -137,10 +146,11 @@ export function generatePlan(
   })
 
   // 3. 规划窗口：从今天到所有任务最远的截止日期
+  // endDate 用当天 23:59:59（避免 0:00 边界进位到下一天）
   let endDate = startDate
   for (const t of sorted) {
     if (t.deadline) {
-      const d = parseIso(t.deadline)
+      const d = parseIsoEndOfDay(t.deadline)
       if (d > endDate) endDate = d
     }
   }

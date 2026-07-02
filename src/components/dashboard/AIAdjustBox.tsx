@@ -17,6 +17,15 @@ import { generatePlan, todayIso } from '@/lib/planner'
 import type { SubTask, DailySetting, DailyPlanEntry } from '@/lib/types'
 import { Button } from '@/components/ui/Button'
 
+// 任务 deadline map（用于 clamp plan_date 不超出 task 范围）
+function buildDeadlineMap(tasks: SubTask[]): Map<string, string> {
+  const m = new Map<string, string>()
+  for (const t of tasks) {
+    if (t.deadline) m.set(t.id, t.deadline)
+  }
+  return m
+}
+
 const FORWARD_DAYS = 30
 
 /**
@@ -125,11 +134,19 @@ async function applyAdjustments(args: {
   }
 
   // 5. 标记 is_user_adjusted + adjustment_id
-  const tagged = finalEntries.map((e) => ({
-    ...e,
-    is_user_adjusted: true,
-    adjustment_id: adjustmentId,
-  }))
+  // clamp plan_date 到 task.deadline（防止 swap 或 generatePlan 错误写到 deadline 之后）
+  const deadlineMap = buildDeadlineMap(tasks)
+  const tagged = finalEntries.map((e) => {
+    const dl = deadlineMap.get(e.sub_task_id)
+    let planDate = e.plan_date
+    if (dl && planDate > dl) planDate = dl
+    return {
+      ...e,
+      plan_date: planDate,
+      is_user_adjusted: true,
+      adjustment_id: adjustmentId,
+    }
+  })
 
   // 6. 删 today+ 的所有 entries（除了 is_user_adjusted 的）
   const { data: oldNonAdjusted } = await supabase
