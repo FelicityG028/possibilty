@@ -118,6 +118,10 @@ async function applyAdjustments(args: {
         }
       }
     }
+    console.log('[AIAdjust] recompute result:', {
+      finalEntryCount: finalEntries.length,
+      from, to,
+    })
   }
 
   // 5. 标记 is_user_adjusted + adjustment_id
@@ -145,10 +149,16 @@ async function applyAdjustments(args: {
 
   // 7. 写入新 entries（带 adjustment 标记）
   if (tagged.length > 0) {
+    console.log('[AIAdjust] writing to DB:', {
+      taggedCount: tagged.length,
+      firstDate: tagged[0]?.plan_date,
+      lastDate: tagged[tagged.length - 1]?.plan_date,
+    })
     const { error: rpcErr } = await supabase.rpc('sync_daily_plan', {
       p_entries: tagged,
       p_delete_from: today,
     })
+    console.log('[AIAdjust] RPC:', rpcErr ? `FAILED: ${rpcErr.message}` : 'success')
     if (rpcErr) {
       console.error('[AIAdjust] RPC FAILED:', rpcErr)
     }
