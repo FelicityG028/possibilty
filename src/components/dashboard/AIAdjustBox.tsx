@@ -76,6 +76,13 @@ async function applyAdjustments(args: {
 
   // 2. 计算基础 entries（先 apply swap/add/remove）
   const afterActions = applyActions(baseEntries, output.actions)
+  console.log('[AIAdjust] input:', {
+    userRequest,
+    actions: output.actions,
+    recompute_range: output.recompute_range,
+    baseEntryCount: baseEntries.length,
+    afterActionCount: afterActions.length,
+  })
 
   // 3. 处理 recompute_range
   let finalEntries = afterActions

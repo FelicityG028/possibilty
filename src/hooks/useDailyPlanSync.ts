@@ -148,6 +148,14 @@ async function doSync(
 
   // 写死算法生成 plan
   const plan = generatePlan(tasks, daily, defaultHours, { startDate: today })
+  console.log('[sync] DEBUG:', {
+    today,
+    taskCount: tasks.length,
+    planDateCount: plan.dates.length,
+    entryCount: Object.values(plan.byDate).reduce((s, d) => s + d.entries.length, 0),
+    existingCount: (allExisting ?? []).length,
+    existingAdjustedCount: (allExisting ?? []).filter((e) => e.is_user_adjusted).length,
+  })
   if (plan.dates.length === 0) {
     setSyncState({ isRunning: false })
     return
@@ -203,11 +211,17 @@ async function doSync(
     await supabase.from('daily_plan_entries').delete().in('id', keysToDelete)
   }
 
+  console.log('[sync] deleting/inserting:', {
+    keysToDeleteCount: keysToDelete.length,
+    newRowsCount: newRows.length,
+  })
+
   if (newRows.length > 0) {
     const { error: rpcErr } = await supabase.rpc('sync_daily_plan', {
       p_entries: newRows,
       p_delete_from: today,
     })
+    console.log('[sync] RPC result:', rpcErr ? `FAILED: ${rpcErr.message}` : 'success')
     if (rpcErr) {
       console.error('[syncPlan] RPC failed:', rpcErr)
     }
