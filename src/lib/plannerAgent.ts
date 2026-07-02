@@ -1,15 +1,12 @@
 /**
- * 任务排程 AI Agent
+ * 任务排程 AI Agent - 调整模式
  * ============================================================================
- * 用 LLM 替代写死的 planner.ts 算法。
+ * AI 不生成完整 plan（写死算法做这个），而是"调整"已生成的基线 plan。
  *
- * 关键设计：
- * 1. 接收：当前任务列表 + 每天可用时间 + 历史 plan
- * 2. 输出：未来日期的 plan entries（JSON 数组）
- * 3. 严格 JSON 输出（用 response_format 约束）
- * 4. 失败时回退到写死算法
+ * 输入：当前 plan + 任务列表 + 每天学习时间 + 用户的特殊需求
+ * 输出：actions 数组（swap / add / remove / set_daily_hours）
  *
- * 不存任何状态：每次 sync 都重新读 DB → 调 LLM → 写回 DB
+ * 失败时回退到基线 plan（由 planner.ts 写死算法生成）
  * ============================================================================
  */
 
@@ -19,247 +16,137 @@ import type { SubTask, DailySetting, DailyPlanEntry } from './types'
 // 类型
 // --------------------------------------------------------------------------
 
-export interface AgentInput {
+export interface AdjustmentInput {
   /** 当前日期 YYYY-MM-DD */
   today: string
+  /** 当前 plan（基线算法生成的） */
+  currentPlan: AdjustmentPlanEntry[]
+  /** 任务列表 */
+  tasks: AdjustmentTask[]
   /** 每天可用时间 map */
   dailyHours: Record<string, number>
-  /** 默认可用时间（fallback） */
+  /** 默认每天学习时间 */
   defaultHours: number
-  /** 任务列表（只传 active 且未完成的 finite 任务） */
-  tasks: AgentTask[]
-  /** 今天已存在的 plan（保留 actual_hours） */
-  existingToday: Record<string, DailyPlanEntry>
+  /** 用户的特殊需求 */
+  userRequest: string
 }
 
-export interface AgentTask {
+export interface AdjustmentPlanEntry {
+  date: string
+  sub_task_id: string
+  task_name: string
+  planned_amount: number
+  planned_hours: number
+}
+
+export interface AdjustmentTask {
   id: string
   name: string
-  category: string
   total: number
-  rate: string // "1 h/单位"
-  rate_units_per_period: number
-  rate_period_hours: number
   completed: number
   deadline: string
+  rate: string
 }
 
-export interface AgentOutput {
-  entries: Array<{
-    plan_date: string // YYYY-MM-DD
-    sub_task_id: string
-    planned_amount: number
-    planned_hours: number
-  }>
-  reasoning: string // 排程说明（给用户看的）
-  overflow_notes: Array<{
-    sub_task_id: string
-    sub_task_name: string
-    shortfall: number // 还差多少单位
-  }>
-}
-
-// --------------------------------------------------------------------------
-// API 调用
-// --------------------------------------------------------------------------
-
-const SYSTEM_PROMPT = `你是"学习排程助手"。基于用户任务列表、每天可用时间、已完成进度，生成未来几天的 plan。
-
-# 排程规则（按优先级）
-1. **紧急任务优先**：截止日（deadline）越早越优先处理
-2. **不挤占**：紧急任务装满前期 days 后，不紧急任务（deadline 晚的）才能用这些 days
-3. **每天总量不能超过 daily_hours[date]**：超出时此 task 的 planned_hours 应被截断
-4. **装得下就装完**：窗口内总容量 ≥ task needs，就按 dailyShare 均分装完
-5. **装不下要明确标 overflow**：在 overflow_notes 里写明哪些 task 差多少
-6. **今天的 plan 保持稳定**：今天的 entry 按现有数据保留，**不要**重排今天
-7. **不紧急任务跳过被紧急任务占满的 days**：只有装得下才装
-
-# 输入 JSON 格式
-{
-  "today": "YYYY-MM-DD",
-  "daily_hours": { "YYYY-MM-DD": hours },  // 未来每天的可用小时
-  "default_hours": number,                  // 缺省值
-  "tasks": [
-    {
-      "id": "uuid",
-      "name": "string",
-      "category": "string",  // 看书/看网课/刷题/背单词/梳理教材/整理论文/背诵知识点/整理框架
-      "total": number,        // 总量，如 300
-      "rate": "X h/单位",     // 速度
-      "rate_units_per_period": number,
-      "rate_period_hours": number,
-      "completed": number,    // 已完成
-      "deadline": "YYYY-MM-DD"
+export type AdjustmentAction =
+  /** 两天的某个 task 量互换 */
+  | {
+      type: 'swap'
+      from_date: string
+      from_task: string
+      to_date: string
+      to_task: string
     }
-  ]
-}
-
-# 输出 JSON 格式（**严格**）
-{
-  "entries": [
-    {
-      "plan_date": "YYYY-MM-DD",
-      "sub_task_id": "uuid",
-      "planned_amount": number,  // 单位数（如 1.5 节）
-      "planned_hours": number    // 小时数（如 1.5h）
+  /** 在某天加 task 量 */
+  | {
+      type: 'add'
+      date: string
+      sub_task_id: string
+      planned_amount_delta: number
+      planned_hours_delta: number
     }
-  ],
-  "reasoning": "string（为什么这样排，用户可见，1-2 句话）",
-  "overflow_notes": [
-    { "sub_task_id": "uuid", "sub_task_name": "string", "shortfall": number }
-  ]
-}
+  /** 在某天减 task 量 */
+  | {
+      type: 'remove'
+      date: string
+      sub_task_id: string
+      planned_amount_delta: number
+      planned_hours_delta: number
+    }
+  /** 改某天可用时间 */
+  | { type: 'set_daily_hours'; date: string; hours: number }
 
-# 计算 hint
-- rate_units_per_period / rate_period_hours = 单位/小时（如 1/2 = 0.5 页/h）
-- 剩余 = total - completed
-- 剩余 hours = 剩余 / 速率
-- 窗口 = deadline - today + 1 天
-- dailyShare（小时/天）= 剩余 hours / 窗口
-- 但要根据每天 daily_hours 上限截断
-`
-
-/**
- * 调用 LLM 生成 plan
- */
-export async function callPlannerAgent(
-  input: AgentInput,
-  apiKey: string
-): Promise<AgentOutput> {
-  if (!apiKey) {
-    throw new Error('VITE_OPENAI_API_KEY not configured')
-  }
-
-  // 构造 user prompt（JSON 输入）
-  const userPrompt = JSON.stringify(
-    {
-      today: input.today,
-      daily_hours: input.dailyHours,
-      default_hours: input.defaultHours,
-      tasks: input.tasks.map((t) => ({
-        id: t.id,
-        name: t.name,
-        category: t.category,
-        total: t.total,
-        rate: t.rate,
-        rate_units_per_period: t.rate_units_per_period,
-        rate_period_hours: t.rate_period_hours,
-        completed: t.completed,
-        deadline: t.deadline,
-        remaining: t.total - t.completed,
-        rate_units_per_hour: t.rate_units_per_period / t.rate_period_hours,
-        window_days:
-          Math.max(
-            1,
-            Math.round(
-              (new Date(t.deadline).getTime() - new Date(input.today).getTime()) /
-                86400000
-            ) + 1
-          ),
-      })),
-    },
-    null,
-    2
-  )
-
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: 'gpt-4o-mini', // 便宜快速
-      temperature: 0.3,
-      max_tokens: 3000,
-      response_format: { type: 'json_object' },
-      messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: userPrompt },
-      ],
-    }),
-  })
-
-  if (!response.ok) {
-    const err = await response.text()
-    throw new Error(`OpenAI API ${response.status}: ${err}`)
-  }
-
-  const data = await response.json()
-  const content = data.choices?.[0]?.message?.content
-  if (!content) throw new Error('Empty OpenAI response')
-
-  const parsed = JSON.parse(content) as AgentOutput
-  return validateOutput(parsed)
-}
-
-/**
- * 校验输出格式
- */
-function validateOutput(raw: any): AgentOutput {
-  if (!raw || typeof raw !== 'object') throw new Error('Output is not an object')
-  if (!Array.isArray(raw.entries)) throw new Error('Output.entries is not array')
-  if (typeof raw.reasoning !== 'string') raw.reasoning = ''
-  if (!Array.isArray(raw.overflow_notes)) raw.overflow_notes = []
-
-  // 校验每个 entry
-  const validEntries = raw.entries.filter(
-    (e: any) =>
-      typeof e?.plan_date === 'string' &&
-      typeof e?.sub_task_id === 'string' &&
-      typeof e?.planned_amount === 'number' &&
-      typeof e?.planned_hours === 'number' &&
-      e.planned_amount > 0 &&
-      e.planned_hours > 0
-  )
-
-  return {
-    entries: validEntries,
-    reasoning: raw.reasoning,
-    overflow_notes: raw.overflow_notes.filter(
-      (n: any) =>
-        typeof n?.sub_task_id === 'string' && typeof n?.shortfall === 'number'
-    ),
-  }
+export interface AdjustmentOutput {
+  actions: AdjustmentAction[]
+  reasoning: string
 }
 
 // --------------------------------------------------------------------------
-// 从 DB 数据构造 AgentInput
+// 从 DB 数据构造 AdjustmentInput
 // --------------------------------------------------------------------------
 
 /**
- * 把 sub_tasks 转成 AgentTask（只传 finite 且 active 且未完成的）
+ * 把 daily_plan_entries 转成 AdjustmentPlanEntry
  */
-export function toAgentTasks(tasks: SubTask[], categoryMap: Map<number, string>): AgentTask[] {
+export function toAdjustmentPlan(
+  entries: DailyPlanEntry[],
+  taskMap: Map<string, string>
+): AdjustmentPlanEntry[] {
+  return entries.map((e) => ({
+    date: e.plan_date,
+    sub_task_id: e.sub_task_id,
+    task_name: taskMap.get(e.sub_task_id) ?? '?',
+    planned_amount: e.planned_amount,
+    planned_hours: e.planned_hours,
+  }))
+}
+
+/**
+ * 把 sub_tasks 转成 AdjustmentTask
+ */
+export function toAdjustmentTasks(tasks: SubTask[]): AdjustmentTask[] {
+  return toAgentTasks(tasks, new Map())
+}
+
+/**
+ * 把 sub_tasks 转成 AgentTask（旧版，保留导出兼容）
+ */
+export function toAgentTasks(
+  tasks: SubTask[],
+  _categoryMap: Map<number, string>
+): AdjustmentTask[] {
   return tasks
     .filter(
       (t) =>
         t.status === 'active' &&
         t.kind === 'finite' &&
         t.total_amount != null &&
-        t.units_per_period != null &&
-        t.period_hours != null &&
-        t.deadline != null &&
         t.completed_amount < t.total_amount
     )
-    .map((t) => {
-      const cat = categoryMap.get(t.category_id) ?? '其他'
-      return {
-        id: t.id,
-        name: t.name,
-        category: cat,
-        total: t.total_amount!,
-        rate: `${t.units_per_period} / ${t.period_hours}h`,
-        rate_units_per_period: t.units_per_period!,
-        rate_period_hours: t.period_hours!,
-        completed: t.completed_amount,
-        deadline: t.deadline!,
-      }
-    })
+    .map((t) => ({
+      id: t.id,
+      name: t.name,
+      total: t.total_amount!,
+      completed: t.completed_amount,
+      deadline: t.deadline ?? '',
+      rate: `${t.units_per_period}/${t.period_hours}h`,
+    }))
 }
 
 /**
- * 把 daily_settings 转换成 date→hours map（从 today 开始往后 60 天）
+ * 把 daily_settings 转成 date→hours map
+ */
+export function toDailyHoursMapForAdj(
+  daily: DailySetting[],
+  defaultHours: number,
+  startDate: string,
+  days: number
+): Record<string, number> {
+  return toDailyHoursMap(daily, defaultHours, startDate, days)
+}
+
+/**
+ * 旧版：保持导出兼容
  */
 export function toDailyHoursMap(
   daily: DailySetting[],
@@ -280,7 +167,7 @@ export function toDailyHoursMap(
 }
 
 /**
- * 收集今天的已有 plan entries（按 sub_task_id 索引）
+ * 收集今天的已有 plan entries
  */
 export function collectTodayEntries(
   entries: DailyPlanEntry[],
@@ -293,4 +180,90 @@ export function collectTodayEntries(
     }
   }
   return map
+}
+
+// --------------------------------------------------------------------------
+// 应用 actions 到 daily_plan_entries
+// --------------------------------------------------------------------------
+
+/**
+ * 把 actions 应用到现有 plan entries 上
+ * 返回新的 entries（不修改原数组）
+ */
+export function applyActions(
+  baseEntries: DailyPlanEntry[],
+  actions: AdjustmentAction[]
+): DailyPlanEntry[] {
+  // 用 key (date|sub_task_id) 索引现有 entries
+  const map = new Map<string, DailyPlanEntry>()
+  for (const e of baseEntries) {
+    map.set(`${e.plan_date}|${e.sub_task_id}`, { ...e })
+  }
+
+  for (const action of actions) {
+    if (action.type === 'swap') {
+      // 两天的 task 量互换
+      const aKey = `${action.from_date}|${action.from_task}`
+      const bKey = `${action.to_date}|${action.to_task}`
+      const a = map.get(aKey)
+      const b = map.get(bKey)
+
+      if (a && b) {
+        // 互换 amount/hours
+        const newA = { ...a, planned_amount: b.planned_amount, planned_hours: b.planned_hours }
+        const newB = { ...b, planned_amount: a.planned_amount, planned_hours: a.planned_hours }
+        map.set(aKey, newA)
+        map.set(bKey, newB)
+      } else if (a && !b) {
+        // B 那天没有这个 task，移到 B
+        const moved = { ...a, plan_date: action.to_date }
+        map.delete(aKey)
+        map.set(bKey, moved)
+      } else if (!a && b) {
+        // A 那天没有，移到 A
+        const moved = { ...b, plan_date: action.from_date }
+        map.delete(bKey)
+        map.set(aKey, moved)
+      }
+    } else if (action.type === 'add' || action.type === 'remove') {
+      const key = `${action.date}|${action.sub_task_id}`
+      const sign = action.type === 'add' ? 1 : -1
+      const existing = map.get(key)
+      const currentAmount = existing?.planned_amount ?? 0
+      const currentHours = existing?.planned_hours ?? 0
+      const newAmount = Math.max(
+        0,
+        currentAmount + sign * action.planned_amount_delta
+      )
+      const newHours = Math.max(
+        0,
+        currentHours + sign * action.planned_hours_delta
+      )
+      if (newAmount === 0 && newHours === 0) {
+        map.delete(key)
+      } else {
+        map.set(key, {
+          ...(existing ?? {
+            id: '',
+            sub_task_id: action.sub_task_id,
+            actual_hours: null,
+            is_completed: false,
+            notes: null,
+            actual_amount: null,
+            created_at: new Date().toISOString(),
+          }),
+          plan_date: action.date,
+          sub_task_id: action.sub_task_id,
+          planned_amount: newAmount,
+          planned_hours: newHours,
+        })
+      }
+    } else if (action.type === 'set_daily_hours') {
+      // 不修改 daily_plan_entries（这是 daily_settings 的事）
+      // 这个 action 在前端需要单独处理：调用 useSetDailyHours
+      // 这里只跳过
+    }
+  }
+
+  return Array.from(map.values())
 }

@@ -15,6 +15,7 @@ import { GanttChart } from '@/components/gantt/GanttChart'
 import { ViewSwitcher } from '@/components/layout/ViewSwitcher'
 import { DailyHoursEditor } from '@/components/calendar/DailyHoursEditor'
 import { SyncStatusBar } from '@/components/dashboard/SyncStatusBar'
+import { AIAdjustBox } from '@/components/dashboard/AIAdjustBox'
 import { ProgressBar } from '@/components/ui/ProgressBar'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Button } from '@/components/ui/Button'
@@ -74,6 +75,11 @@ export function DashboardPage() {
 
       {/* 陪伴小狗 - 右下角浮动 */}
       <CompanionDog ratio={dayRatio} hasTasks={todayEntries.length > 0} />
+
+      {/* AI 调整输入框 - 底部悬浮 */}
+      <div className="fixed bottom-6 right-6 z-40 w-96 max-w-[calc(100vw-3rem)]">
+        <AIAdjustBox />
+      </div>
 
       {/* 按计划预测：当前是否能按时完成所有任务？ */}
       {projection.wontFinishCount > 0 && (

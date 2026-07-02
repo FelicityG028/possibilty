@@ -254,10 +254,39 @@ async function callAgent(
     throw new Error(`Agent API ${resp.status}: ${errText.slice(0, 200)}`)
   }
 
-  const raw = await resp.json()
-  // 直接 validate
-  if (!raw || typeof raw !== 'object') throw new Error('Bad response shape')
-  if (!Array.isArray(raw.entries)) throw new Error('Missing entries')
+  // /api/agent 把 dashscope 的完整响应原样返回
+  // 格式：{ choices: [{ message: { content: "..." } }] }
+  const wrapper = await resp.json()
+  console.log('[callAgent] dashscope wrapper:', JSON.stringify(wrapper).slice(0, 500))
+
+  // 提取 content
+  const content = wrapper?.choices?.[0]?.message?.content
+  if (typeof content !== 'string') {
+    throw new Error(`dashscope response missing content: ${JSON.stringify(wrapper).slice(0, 300)}`)
+  }
+
+  // 解析 content（可能包含 markdown 包裹）
+  const jsonText = content
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```\s*$/, '')
+    .trim()
+  console.log('[callAgent] extracted JSON:', jsonText.slice(0, 500))
+
+  let raw: any
+  try {
+    raw = JSON.parse(jsonText)
+  } catch (e) {
+    throw new Error(`Failed to parse JSON: ${content.slice(0, 200)}`)
+  }
+
+  if (!raw || typeof raw !== 'object') {
+    throw new Error(`Bad response shape: ${JSON.stringify(raw).slice(0, 200)}`)
+  }
+  if (!Array.isArray(raw.entries)) {
+    throw new Error(
+      `Missing entries field. Got keys: ${Object.keys(raw).join(', ')}. First 200 chars: ${JSON.stringify(raw).slice(0, 200)}`
+    )
+  }
   return raw as AgentOutput
 }
 
