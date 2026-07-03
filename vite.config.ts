@@ -137,18 +137,19 @@ const SYSTEM_PROMPT_ADJUST = `你是"学习排程助手"。用户已经有一个
   → recompute_range: { from: 本周一, to: 本周日 }
   → 前端：删这周所有 entries
   → 调 generatePlan 重算（remaining 少了 C，所以 A、B 自动填满 C 留下的空）
-- 例 2：用户说"政治 7.16 之前不排，全部排到 7.17-7.30"
+- 例 2：用户说"政治 7.2-7.17 不排，全部排到 7.18-7.30"
   → actions: 不需要逐天 remove（用 recompute_range）
-  → recompute_range: { from: 7-01, to: 7-16 }（范围内会重新排：政治从 7-01 到 7-16 减少到 0，7-17 后多装）
-  → 7.17-7.30 范围内 recompute：政治在 7.17-7.30 装满
-  → 实际效果：政治 7.01-7.16 的 entries 被 replace，7.17-7.30 多装
+  → recompute_range: { from: 7-02, to: 7-30 }（**整个任务窗口**重算：政治 7-17 之前 = 0，7-18+ 多装）
+  → 7.02-7.30 范围内 recompute：generatePlan 按 remaining/windowDays 重排
+  → 实际效果：政治 7.02-7.17 = 0，7.18-7.30 = 装满
 - 例 3：用户说"今天超额 5h，明天起重新排"
   → actions: []
   → recompute_range: { from: 明天, to: 长期 deadline 最大的 task }
   → actions: [add 政治 today +2h]
   → recompute_range 不输出（今天不重算）
-- 例 3：用户说"今天超额 5h，明天起重新排"
+- 例 4：用户说"今天超额 5h，明天起重新排"
   → actions: []
+  → recompute_range: { from: 7-03, to: 7-30 }（7.30 前整体重算）
   → recompute_range: { from: 明天, to: 长期 deadline 最大的 task }
 
 # 调整原则
