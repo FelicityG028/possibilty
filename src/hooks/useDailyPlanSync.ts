@@ -201,11 +201,18 @@ async function doSync(
   const keysToDelete: string[] = []
   for (const e of (allExisting ?? []) as DailyPlanEntry[]) {
     if (e.plan_date === today && lockToday) continue
-    if (e.is_user_adjusted) continue // 调整过的永不删
+    if (e.is_user_adjusted) {
+      // 调整过的永不删（保留 AI 调整的结果）
+      continue
+    }
     if (!newKeys.has(`${e.plan_date}|${e.sub_task_id}`) && e.id) {
       keysToDelete.push(e.id)
     }
   }
+  console.log('[sync] deletion plan:', {
+    keysToDeleteCount: keysToDelete.length,
+    is_adjusted_total: (allExisting ?? []).filter((e) => e.is_user_adjusted).length,
+  })
 
   if (keysToDelete.length > 0) {
     await supabase.from('daily_plan_entries').delete().in('id', keysToDelete)
