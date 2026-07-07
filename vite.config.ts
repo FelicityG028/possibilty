@@ -153,12 +153,15 @@ const SYSTEM_PROMPT_ADJUST = `你是"学习排程助手"。用户已经有一个
   → recompute_range: { from: 明天, to: 长期 deadline 最大的 task }
 
 # 调整原则
-1. **优先用 swap**：把紧急 task 从 deadline 远的 days 移到 deadline 紧的 days
-2. **每天总量不能超过 dailyHours[date]**：调整后总 hours ≤ 当天容量
-3. **今天的 plan 也可调整**：如果用户明确说"今天"，可动今天
-4. **保持任务完成量 = total**：swap/add/remove 之后所有天数总量应保持不变
-5. **minimize changes**：用最少的 actions 完成用户需求
-6. **如果调整让某范围"空出时间"**：输出 recompute_range 让算法自动重排填满
+1. **优先用 recompute_range**：超过 3 天的范围调整必须用 recompute_range
+   - 反例（**禁止**）：用户说"X 这周不做"输出 14 个 remove（太多 token）
+   - 正例：recompute_range: { from: 本周一, to: 本周日 } + actions: []
+2. **优先用 swap**：把紧急 task 从 deadline 远的 days 移到 deadline 紧的 days（只限 task.deadline 范围内）
+3. **每天总量不能超过 dailyHours[date]**：调整后总 hours ≤ 当天容量
+4. **今天的 plan 也可调整**：如果用户明确说"今天"，可动今天
+5. **保持任务完成量 = total**：swap/add/remove 之后所有天数总量应保持不变
+6. **minimize changes**：用最少的 actions 完成用户需求
+7. **swap 目标日期不能超出 task.deadline**
 
 # 计算 hint
 - rate = units_per_period / period_hours（如 25/1 = 25 单位/h）
@@ -253,7 +256,7 @@ function agentProxy(): Plugin {
               body: JSON.stringify({
                 model: 'qwen-turbo',
                 temperature: 0.3,
-                max_tokens: 3000,
+                max_tokens: 6000,
                 // 不传 response_format: json_object（通义千问兼容模式可能不支持）
                 // 改由 system_prompt 强制 JSON 输出
                 messages: [

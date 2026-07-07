@@ -253,11 +253,36 @@ export function AIAdjustBox() {
         .replace(/\s*```\s*$/, '')
         .trim()
 
+      // Fallback: 截取第一个完整 {...} JSON（处理 AI 输出被截断的情况）
       let output: AdjustmentOutput
       try {
         output = JSON.parse(jsonText)
       } catch (e) {
-        throw new Error(`Failed to parse JSON: ${content.slice(0, 200)}`)
+        const firstBrace = jsonText.indexOf('{')
+        if (firstBrace >= 0) {
+          // 找到最外层匹配的右大括号
+          let depth = 0
+          let endIdx = -1
+          for (let i = firstBrace; i < jsonText.length; i++) {
+            if (jsonText[i] === '{') depth++
+            else if (jsonText[i] === '}') {
+              depth--
+              if (depth === 0) {
+                endIdx = i
+                break
+              }
+            }
+          }
+          if (endIdx > 0) {
+            const partial = jsonText.slice(firstBrace, endIdx + 1)
+            console.warn('[AIAdjust] JSON truncated, trying partial:', partial.slice(0, 200))
+            output = JSON.parse(partial)
+          } else {
+            throw new Error(`Failed to parse JSON: ${content.slice(0, 200)}`)
+          }
+        } else {
+          throw new Error(`Failed to parse JSON: ${content.slice(0, 200)}`)
+        }
       }
 
       if (!Array.isArray(output.actions)) {
