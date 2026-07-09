@@ -19,8 +19,11 @@ BEGIN
       (e->>'sub_task_id')::uuid AS sub_task_id
     FROM jsonb_array_elements(p_entries) AS e
   )
+  -- 删"过期" entries（不在新 plan 里的）
+  -- ★ 关键：跳过 is_user_adjusted=true 的 entries（不删 AI 调整的）
   DELETE FROM public.daily_plan_entries dpe
   WHERE dpe.plan_date >= p_delete_from
+    AND NOT dpe.is_user_adjusted
     AND NOT EXISTS (
       SELECT 1 FROM new_keys nk
       WHERE nk.plan_date = dpe.plan_date AND nk.sub_task_id = dpe.sub_task_id
