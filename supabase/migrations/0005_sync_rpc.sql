@@ -21,8 +21,6 @@ BEGIN
   )
   -- 删"过期" entries（不在新 plan 里的）
   -- ★ 关键：跳过 is_user_adjusted=true 的 entries（不删 AI 调整的）
-  RAISE NOTICE 'sync_daily_plan called: % entries, delete_from=%',
-    jsonb_array_length(p_entries), p_delete_from;
   DELETE FROM public.daily_plan_entries dpe
   WHERE dpe.plan_date >= p_delete_from
     AND NOT dpe.is_user_adjusted
@@ -31,8 +29,8 @@ BEGIN
       WHERE nk.plan_date = dpe.plan_date AND nk.sub_task_id = dpe.sub_task_id
     );
   GET DIAGNOSTICS v_deleted = ROW_COUNT;
-  RAISE NOTICE 'deleted: % entries (is_user_adjusted=true ones kept)', v_deleted;
-  GET DIAGNOSTICS v_deleted = ROW_COUNT;
+  RAISE NOTICE 'sync_daily_plan: input=% entries, deleted=% (is_user_adjusted=true kept)',
+    jsonb_array_length(p_entries), v_deleted;
 
   -- 2. Upsert 新的 entries（事务内）
   --    先对 (plan_date, sub_task_id) 去重 + 合并，避免 21000 错误
