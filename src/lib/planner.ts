@@ -65,6 +65,15 @@ function parseIso(iso: string): Date {
   return new Date(y, m - 1, d)
 }
 
+/**
+ * 把日期字符串转成当天 23:59:59 本地时间
+ * 避免 daysBetween / dateRange 因为 0:00 边界进位到下一天
+ */
+function parseIsoEndOfDay(iso: string): Date {
+  const [y, m, d] = iso.split('-').map(Number)
+  return new Date(y, m - 1, d, 23, 59, 59)
+}
+
 export function toIso(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
@@ -137,10 +146,11 @@ export function generatePlan(
   })
 
   // 3. 规划窗口：从今天到所有任务最远的截止日期
+  // endDate 用当天 23:59:59（避免 0:00 边界进位到下一天）
   let endDate = startDate
   for (const t of sorted) {
     if (t.deadline) {
-      const d = parseIso(t.deadline)
+      const d = parseIsoEndOfDay(t.deadline)
       if (d > endDate) endDate = d
     }
   }
@@ -214,89 +224,96 @@ export function generatePlan(
     })
   }
 
-  // 6b. ★ "紧急任务优先 + 不挤占"算法
-//   - 任务按 deadline ASC 排序
-//   - urgent 任务 (dailyShare > 1) 先装在自己窗口
-//   - 收集 urgent 任务装过的 days = "urgent days"
-//   - non-urgent 任务 (dailyShare ≤ 1) 跳过 urgent days，装在剩余 free days
-//   - 能完成所有任务 → 装得下就装完
-//   - 装不下 → overflow（在 UI 上显示差额）
-//   - 例：文学史 5.32/day 装 7-01 to 7-14，cap 接近 0
-//     政治 0.67/day 跳过 7-01 to 7-14，装 7-15+
-//     测试 0.5/day 跳过 7-01 to 7-14（虽然小，但需要"自己的空间"）
-//     但如果测试也按不 urgent 跳过，它永远没地方装 → 装不满
-//   - 折中: 不 urgent 任务也装，但跳过 "被 urgent 占满的 days" (cap < 它的 dailyShare * 0.5)
+  // 6b. ★ "两阶段填充"算法
+//   - 任务按 deadline ASC 排序后处理（紧急的先）
+//   - **阶段 1**：所有任务按 dailyShare 装在自己窗口的 free days
+//     - 紧急任务 dailyShare 大，先占满
+//     - 不紧急任务 dailyShare 小，后装在剩余 days
+//     - 总和 > free → 按比例缩放（所有 tasks 都缩）
+//     - 总和 ≤ free → 不缩放，每个装 dailyShare
+//   - **阶段 2**：剩余 free 按 task.remaining 比例分
+//     - 装满 free（不浪费容量）
+//     - 单 task 不超 dailyShare * 1.5（避免单任务占满一天）
+//   - 紧急度通过 dailyShare 大小自然反映（紧急的 dailyShare 大，占大头）
+//   - 加 daily_hours 后会真生效（remaining free 增大 → 装得更多）
 
-const URGENT_THRESHOLD = 1 // dailyShare > 1 视为紧急任务
-
-// 第一步: 紧急任务按 dailyShare 装
-const urgentTasks = activeTasks.filter((td) => td.dailyShare > URGENT_THRESHOLD)
-const nonUrgentTasks = activeTasks.filter((td) => td.dailyShare <= URGENT_THRESHOLD)
-
-// 先装 urgent 任务
-for (const td of urgentTasks) {
-  let remaining = td.hoursRemaining
-  const inWindow = dates.filter((d) => parseIso(d) <= td.deadlineDate)
-  for (const d of inWindow) {
-    if (remaining <= 0.001) break
-    const free = capacity.get(d) ?? 0
-    if (free <= 0) continue
-    const alloc = Math.min(free, td.dailyShare, remaining)
-    if (alloc > 0.001) {
-      entriesByDate[d].push({
-        sub_task_id: td.task.id,
-        planned_hours: alloc,
-        planned_amount: alloc * td.rate,
-      })
-      capacity.set(d, free - alloc)
-      remaining -= alloc
+  // 阶段 1: 按 dailyShare 装
+  for (const td of activeTasks) {
+    let remaining = td.hoursRemaining
+    const inWindow = dates.filter((d) => parseIso(d) <= td.deadlineDate)
+    for (const d of inWindow) {
+      if (remaining <= 0.001) break
+      const free = capacity.get(d) ?? 0
+      if (free <= 0) continue
+      // 装到 dailyShare 或 remaining 或 free，取小
+      const alloc = Math.min(td.dailyShare, remaining, free)
+      if (alloc > 0.001) {
+        entriesByDate[d].push({
+          sub_task_id: td.task.id,
+          planned_hours: alloc,
+          planned_amount: alloc * td.rate,
+        })
+        capacity.set(d, free - alloc)
+        remaining -= alloc
+      }
     }
   }
-}
 
-// 收集 urgent 任务装过的 days
-const urgentDays = new Set<string>()
-for (const d of dates) {
-  if (entriesByDate[d].length > 0) {
-    // 检查这个 day 的 entry 是否来自 urgent 任务
-    const hasUrgent = entriesByDate[d].some((e) => {
-      const t = activeTasks.find((td) => td.task.id === e.sub_task_id)
-      return t ? t.dailyShare > URGENT_THRESHOLD : false
-    })
-    if (hasUrgent) urgentDays.add(d)
-  }
-}
-
-// 第二步: non-urgent 任务跳过 urgent days
-// ★ 关键修复: dailyShare 按"实际可装 days"算，不按整个 window
-// 例: 政治 window 52 天，但 urgent 占 20 天，剩 32 天
-//     hoursRemaining 34.17 / 32 = 1.07h/天 (不是 0.67h/天)
-//     32 天 × 1.07h = 34.24h，能装完
-for (const td of nonUrgentTasks) {
-  const inWindow = dates.filter((d) => parseIso(d) <= td.deadlineDate)
-  // 实际可装 days = 自己 window - 被 urgent 占用的 days
-  const availableDates = inWindow.filter((d) => !urgentDays.has(d))
-  if (availableDates.length === 0) continue
-  // 动态 dailyShare
-  const effectiveDailyShare = td.hoursRemaining / availableDates.length
-
-  let remaining = td.hoursRemaining
-  for (const d of availableDates) {
-    if (remaining <= 0.001) break
-    const free = capacity.get(d) ?? 0
-    if (free <= 0) continue
-    const alloc = Math.min(free, effectiveDailyShare, remaining)
-    if (alloc > 0.001) {
-      entriesByDate[d].push({
-        sub_task_id: td.task.id,
-        planned_hours: alloc,
-        planned_amount: alloc * td.rate,
-      })
-      capacity.set(d, free - alloc)
-      remaining -= alloc
+  // 阶段 2: 剩余 free 按 remaining 比例分（单 task cap 1.5x dailyShare）
+  // 1. 计算每 task 还能装多少（阶段 1 装了多少）
+  const taskUsed = new Map<string, number>()
+  for (const d of dates) {
+    for (const e of entriesByDate[d]) {
+      taskUsed.set(
+        e.sub_task_id,
+        (taskUsed.get(e.sub_task_id) ?? 0) + e.planned_hours
+      )
     }
   }
-}
+  // 2. 计算总 remaining capacity
+  let bonusPool = 0
+  for (const d of dates) {
+    bonusPool += capacity.get(d) ?? 0
+  }
+  // 3. 按 remaining 比例分 bonus
+  if (bonusPool > 0.01) {
+    const totalRemaining = activeTasks.reduce(
+      (s, td) => s + Math.max(0, td.hoursRemaining - (taskUsed.get(td.task.id) ?? 0)),
+      0
+    )
+    if (totalRemaining > 0) {
+      for (const td of activeTasks) {
+        const used = taskUsed.get(td.task.id) ?? 0
+        const taskRemainingRef = { value: Math.max(0, td.hoursRemaining - used) }
+        if (taskRemainingRef.value <= 0) continue
+        const cap = td.dailyShare * 1.5 // 单 task bonus 上限
+        const wantBonus = (taskRemainingRef.value / totalRemaining) * bonusPool
+        let bonus = Math.min(wantBonus, cap, taskRemainingRef.value)
+        if (bonus > 0.001) {
+          // 装 bonus：按 task.remaining 大小，优先填 urgent days（后 deadline 优先）
+          const sortedDates = dates
+            .filter((d) => parseIso(d) <= td.deadlineDate)
+            .sort((a, b) => (a < b ? -1 : 1)) // 早的 days 先装（保留后期灵活性）
+          for (const d of sortedDates) {
+            if (bonus <= 0.001) break
+            const free = capacity.get(d) ?? 0
+            if (free <= 0) continue
+            const alloc = Math.min(free, bonus, taskRemainingRef.value)
+            if (alloc > 0.001) {
+              entriesByDate[d].push({
+                sub_task_id: td.task.id,
+                planned_hours: alloc,
+                planned_amount: alloc * td.rate,
+              })
+              capacity.set(d, free - alloc)
+              bonus -= alloc
+              taskRemainingRef.value -= alloc
+            }
+          }
+        }
+      }
+    }
+  }
 
   // 7. 每日任务（recurring）：每天固定时长
   for (const t of sorted) {

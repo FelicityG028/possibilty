@@ -69,6 +69,21 @@ export interface DailyPlanEntry {
   actual_hours: number | null
   notes: string | null
   created_at: string
+  /** 标记为 true 表示这是用户/AI 调整的，sync 不覆盖 */
+  is_user_adjusted: boolean
+  /** 关联到 adjustment_logs 的 id，方便清除 */
+  adjustment_id: string | null
+}
+
+/** AI/用户调整日志 */
+export interface AdjustmentLog {
+  id: string
+  user_request: string
+  reasoning: string | null
+  /** 存储 actions JSON（JSONB）*/
+  actions: unknown
+  affected_dates: string[]
+  created_at: string
 }
 
 /** 进度日志 */

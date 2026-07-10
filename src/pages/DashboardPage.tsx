@@ -14,6 +14,8 @@ import { MonthCalendar } from '@/components/calendar/MonthCalendar'
 import { GanttChart } from '@/components/gantt/GanttChart'
 import { ViewSwitcher } from '@/components/layout/ViewSwitcher'
 import { DailyHoursEditor } from '@/components/calendar/DailyHoursEditor'
+import { SyncStatusBar } from '@/components/dashboard/SyncStatusBar'
+import { AIAdjustBox } from '@/components/dashboard/AIAdjustBox'
 import { ProgressBar } from '@/components/ui/ProgressBar'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Button } from '@/components/ui/Button'
@@ -52,6 +54,7 @@ export function DashboardPage() {
 
   return (
     <div className="space-y-4">
+      <SyncStatusBar />
       <div
         className="flex items-center justify-between flex-wrap gap-2 px-4 py-2 rounded-2xl"
         style={{ border: '1px solid #111111' }}
@@ -72,6 +75,11 @@ export function DashboardPage() {
 
       {/* 陪伴小狗 - 右下角浮动 */}
       <CompanionDog ratio={dayRatio} hasTasks={todayEntries.length > 0} />
+
+      {/* AI 调整输入框 - 底部悬浮 */}
+      <div className="fixed bottom-6 right-6 z-40 w-96 max-w-[calc(100vw-3rem)]">
+        <AIAdjustBox />
+      </div>
 
       {/* 按计划预测：当前是否能按时完成所有任务？ */}
       {projection.wontFinishCount > 0 && (

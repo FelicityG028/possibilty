@@ -1,40 +1,75 @@
 /**
  * 把规划引擎的输出同步到 daily_plan_entries 表。
  *
- * 关键设计：
- * 1. 过去日期冻结（不动）
- * 2. ★ 触发源区分：
- *    - task 进度变化 → 锁定 today（user 今天的 plan 不变）
- *    - daily_settings 变化 → 解锁 today（让 today 的 plan 跟着新可用时间调整）
- * 3. 明天+根据 user 进度动态算
- * 4. 用 Supabase RPC（事务性 delete + upsert）
- * 5. 单例锁：防止并发 sync
+ * v3: 纯写死算法
+ *   - sync 只用 generatePlan（planner.ts）
+ *   - AI 调整是独立功能（AIAdjustBox），不影响基线 sync
+ *   - 失败回退：写死算法失败 → 静默忽略
+ *   - 单例锁：防止并发 sync
+ *
+ * v2 历史：曾尝试 AI agent 生成 plan，但不稳定（输出格式错）。
+ *     AI 已改为"调整 plan"模式（AIAdjustBox），sync 保持纯写死。
  */
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useSyncExternalStore } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { useSubTasks } from './useSubTasks'
 import { useDailySettings, useDefaultSetting } from './useDailySettings'
+import { useCategories } from './useCategories'
 import { generatePlan, todayIso } from '@/lib/planner'
-import type { SubTask, DailySetting, DailyPlanEntry } from '@/lib/types'
+import type { SubTask, DailySetting, DailyPlanEntry, Category } from '@/lib/types'
 
 // 模块级锁：防止并发 sync
 let syncing = false
 
+// 模块级订阅：UI 监听 sync 状态
+const syncListeners = new Set<() => void>()
+let syncState: {
+  isRunning: boolean
+  lastError: string | null
+} = {
+  isRunning: false,
+  lastError: null,
+}
+
+function setSyncState(patch: Partial<typeof syncState>) {
+  syncState = { ...syncState, ...patch }
+  syncListeners.forEach((l) => l())
+}
+
+function subscribeSync(listener: () => void) {
+  syncListeners.add(listener)
+  return () => {
+    syncListeners.delete(listener)
+  }
+}
+
+/**
+ * 组件可以订阅 sync 状态
+ */
+export function useSyncStatus() {
+  return useSyncExternalStore(
+    subscribeSync,
+    () => syncState,
+    () => syncState
+  )
+}
+
 /**
  * 监听任务/设置变化，把 plan 写回 daily_plan_entries。
  * 关键：
- *   - daily/defaultSetting 变化 → 完整 sync（覆盖 today + future）
- *   - 只 tasks 变化 → 锁定 today（保留 user 已看到的今天的 plan）
+ *   - daily/defaultSetting 变化 → 解锁 today
+ *   - 只 tasks 变化 → 锁定 today
+ *   - 完全用写死算法（generatePlan），无 AI 介入
  */
 export function useDailyPlanSync() {
   const { data: tasks = [] } = useSubTasks()
   const { data: daily = [] } = useDailySettings()
   const { data: defaultSetting } = useDefaultSetting()
+  const { data: categories = [] } = useCategories()
   const qc = useQueryClient()
   const ready = useRef(false)
 
-  // 跟踪前一次的值，判断这次变化来自哪里
   const prevTasks = useRef(tasks)
   const prevDaily = useRef(daily)
   const prevDefault = useRef(defaultSetting)
@@ -46,12 +81,11 @@ export function useDailyPlanSync() {
         prevTasks.current = tasks
         prevDaily.current = daily
         prevDefault.current = defaultSetting
-        void syncPlan(tasks, daily, defaultSetting?.available_hours ?? 6, qc, false)
+        void syncPlan(tasks, daily, categories, defaultSetting?.available_hours ?? 6, qc, false)
       }, 500)
       return () => clearTimeout(t)
     }
 
-    // 判断变化来源
     const tasksChanged = prevTasks.current !== tasks
     const dailyChanged =
       prevDaily.current !== daily || prevDefault.current !== defaultSetting
@@ -60,17 +94,23 @@ export function useDailyPlanSync() {
     prevDaily.current = daily
     prevDefault.current = defaultSetting
 
-    // 规则：
-    //   - daily 变化 → 解锁 today（让今天的 plan 跟着新 available 调整）
-    //   - 只 task 变化 → 锁定 today
     const lockToday = tasksChanged && !dailyChanged
-    void syncPlan(tasks, daily, defaultSetting?.available_hours ?? 6, qc, lockToday)
-  }, [tasks, daily, defaultSetting, qc])
+    void syncPlan(tasks, daily, categories, defaultSetting?.available_hours ?? 6, qc, lockToday)
+  }, [tasks, daily, defaultSetting, categories, qc])
+}
+
+interface NewRow {
+  plan_date: string
+  sub_task_id: string
+  planned_amount: number
+  planned_hours: number
+  actual_hours: number | null
 }
 
 async function syncPlan(
   tasks: SubTask[],
   daily: DailySetting[],
+  _categories: Category[],
   defaultHours: number,
   qc: ReturnType<typeof useQueryClient>,
   lockToday: boolean
@@ -92,47 +132,32 @@ async function doSync(
   lockToday: boolean
 ): Promise<void> {
   const today = todayIso()
-  const plan = generatePlan(tasks, daily, defaultHours, { startDate: today })
-  if (plan.dates.length === 0) return
+  setSyncState({ isRunning: true, lastError: null })
 
   // 抓取所有 today+future entries
-  const { data: existing, error: existingErr } = await supabase
+  const { data: allExisting } = await supabase
     .from('daily_plan_entries')
     .select('*')
-    .in('plan_date', plan.dates)
-  if (existingErr) {
-    // eslint-disable-next-line no-console
-    console.error('[syncPlan] fetch existing failed:', existingErr)
+    .gte('plan_date', today)
+    .order('plan_date', { ascending: true })
+
+  const existingByKey = new Map<string, DailyPlanEntry>()
+  for (const e of (allExisting ?? []) as DailyPlanEntry[]) {
+    existingByKey.set(`${e.plan_date}|${e.sub_task_id}`, e)
+  }
+
+  // 写死算法生成 plan
+  const plan = generatePlan(tasks, daily, defaultHours, { startDate: today })
+  if (plan.dates.length === 0) {
+    setSyncState({ isRunning: false })
     return
   }
 
-  const existingByKey = new Map<string, DailyPlanEntry>()
-  for (const e of existing ?? []) {
-    existingByKey.set(`${e.plan_date}|${e.sub_task_id}`, e as DailyPlanEntry)
-  }
-
-  const newRows: Array<{
-    plan_date: string
-    sub_task_id: string
-    planned_amount: number
-    planned_hours: number
-    actual_hours: number | null
-  }> = []
-  const keysToDelete: string[] = []
-
+  const newRows: NewRow[] = []
   for (const d of plan.dates) {
-    // ★ 锁定 today 时跳过（保留 user 已看到的今天的 plan）
-    if (d === today && lockToday) {
-      continue
-    }
-
-    const entriesForDate = plan.byDate[d].entries
-    const newKeysForDate = new Set<string>()
-
-    for (const e of entriesForDate) {
-      const key = `${d}|${e.sub_task_id}`
-      newKeysForDate.add(key)
-      const old = existingByKey.get(key)
+    if (d === today && lockToday) continue
+    for (const e of plan.byDate[d].entries) {
+      const old = existingByKey.get(`${d}|${e.sub_task_id}`)
       newRows.push({
         plan_date: d,
         sub_task_id: e.sub_task_id,
@@ -141,41 +166,59 @@ async function doSync(
         actual_hours: old?.actual_hours ?? null,
       })
     }
+  }
 
-    // 删除 DB 中有但新 plan 没有的 entries
-    for (const e of existing ?? []) {
-      if (e.plan_date !== d) continue
-      const key = `${d}|${e.sub_task_id}`
-      if (!newKeysForDate.has(key) && e.id) {
-        keysToDelete.push(e.id)
+  // ★ 关键：跳过用户调整过的 entries（不被新 plan 覆盖）
+  // 把"老的调整 entry"重新加进 newRows（保留旧值，不被 generatePlan 覆盖）
+  const adjustedEntries = new Set<string>()
+  for (const e of (allExisting ?? []) as DailyPlanEntry[]) {
+    if (e.is_user_adjusted && e.id) {
+      const key = `${e.plan_date}|${e.sub_task_id}`
+      if (!newRows.some((r) => `${r.plan_date}|${r.sub_task_id}` === key)) {
+        // generatePlan 没产出这个 entry（被新算法改了），保留旧的
+        newRows.push({
+          plan_date: e.plan_date,
+          sub_task_id: e.sub_task_id,
+          planned_amount: e.planned_amount,
+          planned_hours: e.planned_hours,
+          actual_hours: e.actual_hours ?? null,
+        })
+        adjustedEntries.add(key)
       }
     }
   }
 
-  if (keysToDelete.length > 0) {
-    const { error: delErr } = await supabase
-      .from('daily_plan_entries')
-      .delete()
-      .in('id', keysToDelete)
-    if (delErr) {
-      // eslint-disable-next-line no-console
-      console.error('[syncPlan] delete failed:', delErr)
+  // 删除"过期" entries（DB 有但新 plan 没有，且不是调整过的）
+  const newKeys = new Set(newRows.map((r) => `${r.plan_date}|${r.sub_task_id}`))
+  const keysToDelete: string[] = []
+  for (const e of (allExisting ?? []) as DailyPlanEntry[]) {
+    if (e.plan_date === today && lockToday) continue
+    if (e.is_user_adjusted) {
+      // 调整过的永不删（保留 AI 调整的结果）
+      continue
+    }
+    if (!newKeys.has(`${e.plan_date}|${e.sub_task_id}`) && e.id) {
+      keysToDelete.push(e.id)
     }
   }
 
+  if (keysToDelete.length > 0) {
+    await supabase.from('daily_plan_entries').delete().in('id', keysToDelete)
+  }
+
   if (newRows.length > 0) {
-    const { data: rpcResult, error: rpcErr } = await supabase.rpc('sync_daily_plan', {
+    const { error: rpcErr } = await supabase.rpc('sync_daily_plan', {
       p_entries: newRows,
       p_delete_from: today,
     })
     if (rpcErr) {
-      // eslint-disable-next-line no-console
-      console.error('[syncPlan] RPC failed:', rpcErr)
-      return
+      console.error('[sync] RPC FAILED:', rpcErr.message)
     }
-    // eslint-disable-next-line no-console
-    console.log('[syncPlan] OK', rpcResult)
+    if (rpcErr) {
+      console.error('[syncPlan] RPC failed:', rpcErr)
+    }
   }
 
   qc.invalidateQueries({ queryKey: ['daily_plan'] })
+  setSyncState({ isRunning: false })
 }
