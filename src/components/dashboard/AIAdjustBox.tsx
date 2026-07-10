@@ -155,12 +155,20 @@ async function applyAdjustments(args: {
 
   // 7. 写入新 entries（带 adjustment 标记）
   if (tagged.length > 0) {
-    const { error: rpcErr } = await supabase.rpc('sync_daily_plan', {
+    // log 任务名映射（排查 AI 是否找对 task）
+    const taskMap = new Map(tasks.map((t) => [t.id, t.name]))
+    const taskNames = new Set(
+      tagged.map((e) => taskMap.get(e.sub_task_id) || '?')
+    )
+    console.log('[AIAdjust] writing tasks:', Array.from(taskNames).join(', '))
+    const { error: rpcErr, data: rpcData } = await supabase.rpc('sync_daily_plan', {
       p_entries: tagged,
       p_delete_from: today,
     })
     if (rpcErr) {
       console.error('[AIAdjust] RPC FAILED:', rpcErr.message)
+    } else {
+      console.log('[AIAdjust] RPC success:', rpcData)
     }
   } else {
     console.warn('[AIAdjust] WARNING: tagged is empty, nothing to write')
