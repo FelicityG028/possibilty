@@ -57,10 +57,17 @@ BEGIN
   SELECT plan_date, sub_task_id, planned_amount, planned_hours, actual_hours, is_user_adjusted, adjustment_id
   FROM aggregated
   ON CONFLICT (plan_date, sub_task_id) DO UPDATE SET
-    planned_amount = EXCLUDED.planned_amount,
-    planned_hours  = EXCLUDED.planned_hours,
+    -- ★ 关键：is_user_adjusted=true 的 entry 保留 old 值（不被 EXCLUDED/base 覆盖）
+    planned_amount = CASE
+      WHEN public.daily_plan_entries.is_user_adjusted THEN public.daily_plan_entries.planned_amount
+      ELSE EXCLUDED.planned_amount
+    END,
+    planned_hours  = CASE
+      WHEN public.daily_plan_entries.is_user_adjusted THEN public.daily_plan_entries.planned_hours
+      ELSE EXCLUDED.planned_hours
+    END,
     actual_hours   = COALESCE(EXCLUDED.actual_hours, public.daily_plan_entries.actual_hours),
-    -- is_user_adjusted 同步（新的是 true 就 true；新是 false 保持旧值；防止 sync 把用户调整覆盖掉）
+    -- is_user_adjusted 同步（新的是 true 就 true；新是 false 保持旧值）
     is_user_adjusted = public.daily_plan_entries.is_user_adjusted OR EXCLUDED.is_user_adjusted,
     -- adjustment_id 同步
     adjustment_id = COALESCE(EXCLUDED.adjustment_id, public.daily_plan_entries.adjustment_id);
