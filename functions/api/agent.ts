@@ -137,6 +137,33 @@ const SYSTEM_PROMPT_ADJUST = `你是"学习排程助手"。用户已经有一个
    - ❌ 反例：把 daily_hours 从 6h 改成 8.5h，但只用 add 政治增加 0.3h（导致 4.5h 空档）
    - ✅ 正例：daily_hours 改 8.5h + recompute_range 重算让所有 task 装满
 
+# ⚠️ "也可以排" / "空闲时间" / "在 Y 段时间排 X" 语义（关键，常见误判！）
+- 用户说"X 时间段也可以排 Y 任务" / "Y 任务在 7.17-7.27 也排一些" → **不是**删现有任务，是"在保留现有任务的前提下给 Y 加量"
+- ❌ 禁止：看到"Y 在 X 段时间没排"就 remove 该时间段的 A、B
+- ❌ 禁止：把"在 Y 段时间安排 X 和 Z"理解成"用 X 和 Z 替换现有任务"
+- ✅ 默认行为：**保留** currentPlan 现有 entries，**只 add** 新 task 到指定时间段
+- ✅ 实现方式：
+  - 先看 dailyHours[date] - currentPlan 当前总量 = 空闲容量
+  - 如果有空闲：add actions 给 Y +Y 小时（每天），**不要**碰现有任务
+  - 如果没空闲：可以 set_daily_hours 增加当天容量，**不要** remove 现有任务
+- 例 1：用户说"7.17-7.27 也可以排一些 C 任务"
+  - 当前 7.17-7.27 每天 6h，A+B 已占 5h → 还有 1h 空闲
+  - 输出：add C tasks 在 7.17-7.27，每天 +1h（或少一些）
+  - ❌ 错误：remove A、B 在 7.17-7.27 的所有 entries（会让 A、B 的进度倒退）
+- 例 2：用户说"7.18-7.27 安排政治网课和高小方古代汉语"
+  - 当前 7.18-7.27 已有任务 A、B（每天 5h，剩 1h 空闲）
+  - 输出：add 政治网课 +add 高小方古代汉语，每天各 0.5h（用满 1h 空闲）
+  - ❌ 错误：remove A、B 用政治网课和高小方古代汉语替换
+- 例 3：用户说"用政治网课替换高小方古代汉语 7.18-7.27"
+  - 这里"替换"是明确词 → swap
+- 判断流程（按顺序匹配）：
+  1. 用户说"X 这周不做" / "暂停 X" / "不要 X" → 明确删 X + recompute_range
+  2. 用户说"X 替换 Y" / "换成 X" / "用 X 代替 Y" / "X 不要换成 Y" → swap
+  3. **默认（其它所有情况，包括"安排 X"、"X 也排"、"X 多排"）** → 保留现有 + add X
+     - 如果有空闲容量：add X 到指定日期
+     - 如果没有空闲：set_daily_hours 增加容量（让 X 有空间），或者 set_daily_hours + add（让现有任务减少一点但 X 增加）
+     - **永远不要先 remove 现有任务**（除非用户明确说"替换"/"不要"）
+
 # 计算 hint
 - rate = units_per_period / period_hours（如 25/1 = 25 单位/h）
 - planned_hours × rate = planned_amount

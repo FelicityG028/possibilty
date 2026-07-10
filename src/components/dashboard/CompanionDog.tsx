@@ -91,7 +91,7 @@ export function CompanionDog({ ratio, hasTasks }: CompanionDogProps) {
   const displayEmoji = clicked ? '🐕‍🦺' : normalEmoji
 
   return (
-    <div className="fixed bottom-6 left-6 z-40 max-w-xs select-none">
+    <div className="max-w-xs select-none">
       <div className="flex items-end gap-2">
         {/* 小狗 */}
         <div

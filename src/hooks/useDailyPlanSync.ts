@@ -81,21 +81,26 @@ export function useDailyPlanSync() {
         prevTasks.current = tasks
         prevDaily.current = daily
         prevDefault.current = defaultSetting
-        void syncPlan(tasks, daily, categories, defaultSetting?.available_hours ?? 6, qc, false)
+        void syncPlan(tasks, daily, categories, defaultSetting?.available_hours ?? 6, qc, false, false)
       }, 500)
       return () => clearTimeout(t)
     }
 
     const tasksChanged = prevTasks.current !== tasks
-    const dailyChanged =
-      prevDaily.current !== daily || prevDefault.current !== defaultSetting
+    // 显式数值比较：只有 daily_settings 列表或 default_hours 实际数值变化时才认为 dailyChanged
+    // 这样 AI 调整 entry（只改 daily_plan_entries）不会误触发清空
+    const prevDefaultHours = prevDefault.current?.available_hours ?? null
+    const newDefaultHours = defaultSetting?.available_hours ?? null
+    const defaultHoursChanged = prevDefaultHours !== newDefaultHours
+    const dailyContentChanged = !sameDailySettings(prevDaily.current, daily)
+    const dailyChanged = defaultHoursChanged || dailyContentChanged
 
     prevTasks.current = tasks
     prevDaily.current = daily
     prevDefault.current = defaultSetting
 
     const lockToday = tasksChanged && !dailyChanged
-    void syncPlan(tasks, daily, categories, defaultSetting?.available_hours ?? 6, qc, lockToday)
+    void syncPlan(tasks, daily, categories, defaultSetting?.available_hours ?? 6, qc, lockToday, dailyChanged)
   }, [tasks, daily, defaultSetting, categories, qc])
 }
 
@@ -107,18 +112,35 @@ interface NewRow {
   actual_hours: number | null
 }
 
+/**
+ * 比较两个 daily_settings 列表的实际内容是否相同。
+ * 用于判断用户/AI 是否修改了每日学习时间。
+ */
+function sameDailySettings(a: DailySetting[] | undefined, b: DailySetting[] | undefined): boolean {
+  if (a === b) return true
+  if (!a || !b) return false
+  if (a.length !== b.length) return false
+  const map = new Map<string, number>()
+  for (const s of a) map.set(s.date, s.available_hours)
+  for (const s of b) {
+    if (map.get(s.date) !== s.available_hours) return false
+  }
+  return true
+}
+
 async function syncPlan(
   tasks: SubTask[],
   daily: DailySetting[],
   _categories: Category[],
   defaultHours: number,
   qc: ReturnType<typeof useQueryClient>,
-  lockToday: boolean
+  lockToday: boolean,
+  dailyChanged: boolean
 ): Promise<void> {
   if (syncing) return
   syncing = true
   try {
-    await doSync(tasks, daily, defaultHours, qc, lockToday)
+    await doSync(tasks, daily, defaultHours, qc, lockToday, dailyChanged)
   } finally {
     syncing = false
   }
@@ -129,10 +151,21 @@ async function doSync(
   daily: DailySetting[],
   defaultHours: number,
   qc: ReturnType<typeof useQueryClient>,
-  lockToday: boolean
+  lockToday: boolean,
+  dailyChanged: boolean
 ): Promise<void> {
   const today = todayIso()
   setSyncState({ isRunning: true, lastError: null })
+
+  // ★ 关键：当 daily_hours 变化时，清空所有 is_user_adjusted=true 的 entries
+  // 这些 entries 是按老 capacity 算的，必须重算
+  if (dailyChanged) {
+    await supabase
+      .from('daily_plan_entries')
+      .update({ is_user_adjusted: false, adjustment_id: null })
+      .eq('is_user_adjusted', true)
+      .gte('plan_date', today)
+  }
 
   // 抓取所有 today+future entries
   const { data: allExisting } = await supabase

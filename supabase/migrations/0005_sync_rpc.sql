@@ -36,6 +36,8 @@ BEGIN
   --    先对 (plan_date, sub_task_id) 去重 + 合并，避免 21000 错误
   --    支持 is_user_adjusted / adjustment_id（v0.3+ 持久化 AI 调整用）
   --    不嵌套子查询（避免 e 列名歧义）
+  --    ★ AI 调整：传进来的 entry 带 is_user_adjusted=true 时强制覆盖旧值
+  --      （不论旧的是不是 adjusted），这样连续 AI 调整能正确更新
   WITH aggregated AS (
     SELECT
       (e->>'plan_date')::date        AS plan_date,
@@ -57,19 +59,24 @@ BEGIN
   SELECT plan_date, sub_task_id, planned_amount, planned_hours, actual_hours, is_user_adjusted, adjustment_id
   FROM aggregated
   ON CONFLICT (plan_date, sub_task_id) DO UPDATE SET
-    -- ★ 关键：is_user_adjusted=true 的 entry 保留 old 值（不被 EXCLUDED/base 覆盖）
+    -- ★ 关键：
+    --   1. 新 entry 是 is_user_adjusted=true（AI 调整）→ 强制覆盖旧值
+    --   2. 旧 entry 是 is_user_adjusted=true + 新的是 false（基线 sync）→ 保留旧值
+    --   3. 两边都不是 adjusted → 用新值
     planned_amount = CASE
+      WHEN EXCLUDED.is_user_adjusted THEN EXCLUDED.planned_amount
       WHEN public.daily_plan_entries.is_user_adjusted THEN public.daily_plan_entries.planned_amount
       ELSE EXCLUDED.planned_amount
     END,
     planned_hours  = CASE
+      WHEN EXCLUDED.is_user_adjusted THEN EXCLUDED.planned_hours
       WHEN public.daily_plan_entries.is_user_adjusted THEN public.daily_plan_entries.planned_hours
       ELSE EXCLUDED.planned_hours
     END,
     actual_hours   = COALESCE(EXCLUDED.actual_hours, public.daily_plan_entries.actual_hours),
-    -- is_user_adjusted 同步（新的是 true 就 true；新是 false 保持旧值）
+    -- is_user_adjusted：任一为 true 则为 true（AI 调整一旦标记就持续生效）
     is_user_adjusted = public.daily_plan_entries.is_user_adjusted OR EXCLUDED.is_user_adjusted,
-    -- adjustment_id 同步
+    -- adjustment_id 同步（新值优先）
     adjustment_id = COALESCE(EXCLUDED.adjustment_id, public.daily_plan_entries.adjustment_id);
   GET DIAGNOSTICS v_upserted = ROW_COUNT;
 

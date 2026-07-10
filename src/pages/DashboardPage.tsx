@@ -73,11 +73,8 @@ export function DashboardPage() {
         </div>
       </div>
 
-      {/* 陪伴小狗 - 右下角浮动 */}
-      <CompanionDog ratio={dayRatio} hasTasks={todayEntries.length > 0} />
-
-      {/* AI 调整输入框 - 底部悬浮 */}
-      <div className="fixed bottom-6 right-6 z-40 w-96 max-w-[calc(100vw-3rem)]">
+      {/* AI 调整输入框 - 左下角悬浮（与 sidebar 同宽） */}
+      <div className="fixed bottom-6 left-6 z-40 w-60 max-w-[calc(100vw-3rem)]">
         <AIAdjustBox />
       </div>
 
@@ -232,7 +229,15 @@ export function DashboardPage() {
       </div>
 
       {/* 主视图 */}
-      {viewMode === 'calendar' ? <MonthCalendar /> : <GanttChart />}
+      <div className="relative">
+        {viewMode === 'calendar' ? <MonthCalendar /> : <GanttChart />}
+        {/* 陪伴小狗 - 跟随日历滚动，贴在日历视图右上角 */}
+        <div className="absolute top-2 right-2 z-30 pointer-events-none">
+          <div className="pointer-events-auto">
+            <CompanionDog ratio={dayRatio} hasTasks={todayEntries.length > 0} />
+          </div>
+        </div>
+      </div>
     </div>
   )
 }
