@@ -90,10 +90,24 @@ async function applyAdjustments(args: {
   let finalEntries = afterActions
   if (output.recompute_range) {
     const { from, to } = output.recompute_range
-    // 删范围内所有 entries（is_user_adjusted 标记的也删——因为我们正在重算它们）
-    // 注：adjustment_id 关联的会丢，但反正我们要重算
+
+    // ★ 关键修复：合并 actions + recompute_range
+    // 如果 LLM 同时输出了 add/remove actions，**这些日期的精确意图优先**
+    // 只有"没有显式修改过"的日期才用 generatePlan 重算（填补空缺）
+    const explicitDates = new Set<string>()
+    for (const a of output.actions) {
+      if (a.type === 'swap') {
+        explicitDates.add(a.from_date)
+        explicitDates.add(a.to_date)
+      } else if (a.type === 'add' || a.type === 'remove') {
+        explicitDates.add(a.date)
+      }
+    }
+
+    // 删范围内"非显式修改过"的 entries（让 generatePlan 重新填充）
     finalEntries = afterActions.filter(
-      (e) => !(e.plan_date >= from && e.plan_date <= to)
+      (e) =>
+        !(e.plan_date >= from && e.plan_date <= to && !explicitDates.has(e.plan_date))
     )
 
     // 调 generatePlan 重算范围内（remaining 反映 actions 后的状态）
@@ -101,6 +115,8 @@ async function applyAdjustments(args: {
     if (plan.dates.length > 0) {
       for (const d of plan.dates) {
         if (!isInRange(d, from, to)) continue
+        // 跳过"显式修改过的日期"——保留 LLM 的精确意图
+        if (explicitDates.has(d)) continue
         for (const e of plan.byDate[d].entries) {
           // 转成 DailyPlanEntry（PlannedEntry 只有部分字段）
           finalEntries.push({
@@ -357,16 +373,21 @@ export function AIAdjustBox() {
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !isLoading) handleAdjust()
           }}
-          placeholder="例：今天和明天多排政治到 8h，文学史推到后天"
+          placeholder="例：政治多排到 8h"
           disabled={isLoading}
-          className="flex-1 px-3 py-2 rounded text-sm focus:outline-none"
+          className="flex-1 min-w-0 px-3 py-2 rounded text-sm focus:outline-none"
           style={{
             border: '1.5px solid #111111',
             color: '#111111',
             backgroundColor: '#FFFFFF',
           }}
         />
-        <Button onClick={handleAdjust} disabled={isLoading || !request.trim()}>
+        <Button
+          onClick={handleAdjust}
+          disabled={isLoading || !request.trim()}
+          className="shrink-0 whitespace-nowrap"
+          size="sm"
+        >
           {isLoading ? '调整中…' : '调整'}
         </Button>
       </div>
