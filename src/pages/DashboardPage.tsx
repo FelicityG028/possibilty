@@ -73,8 +73,8 @@ export function DashboardPage() {
         </div>
       </div>
 
-      {/* AI 调整输入框 - 左下角悬浮（与 sidebar 同宽） */}
-      <div className="fixed bottom-6 left-6 z-40 w-60 max-w-[calc(100vw-3rem)]">
+      {/* AI 调整输入框 - 左侧中部悬浮（避开平板键盘） */}
+      <div className="fixed left-6 top-1/3 z-40 w-60 max-w-[calc(100vw-3rem)]">
         <AIAdjustBox />
       </div>
 

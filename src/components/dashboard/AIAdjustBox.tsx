@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { useSubTasks } from '@/hooks/useSubTasks'
@@ -203,6 +203,16 @@ export function AIAdjustBox() {
   const qc = useQueryClient()
   const setDailyHoursMut = useSetDailyHours()
 
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  // 自动调高 textarea：根据内容高度调整，最小 36px，最大 200px
+  function autoResize() {
+    const el = textareaRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = Math.min(Math.max(el.scrollHeight, 36), 200) + 'px'
+  }
+
   const [request, setRequest] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [lastResult, setLastResult] = useState<{
@@ -316,6 +326,8 @@ export function AIAdjustBox() {
         recompute_range: output.recompute_range,
       })
       setRequest('')
+      // 用 setTimeout 等 DOM 更新后重置高度
+      setTimeout(autoResize, 0)
       qc.invalidateQueries({ queryKey: ['daily_plan'] })
       qc.invalidateQueries({ queryKey: ['daily_summary'] })
     } catch (err) {
@@ -365,21 +377,32 @@ export function AIAdjustBox() {
         </span>
       </div>
 
-      <div className="flex gap-2">
-        <input
-          type="text"
+      <div className="flex gap-2 items-end">
+        <textarea
+          ref={textareaRef}
           value={request}
-          onChange={(e) => setRequest(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !isLoading) handleAdjust()
+          onChange={(e) => {
+            setRequest(e.target.value)
+            autoResize()
           }}
-          placeholder="例：政治多排到 8h"
+          onKeyDown={(e) => {
+            // Cmd/Ctrl + Enter 提交；Enter 单独按 = 换行
+            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !isLoading) {
+              e.preventDefault()
+              handleAdjust()
+            }
+          }}
+          placeholder="例：政治多排到 8h（⌘+Enter 提交）"
           disabled={isLoading}
-          className="flex-1 min-w-0 px-3 py-2 rounded text-sm focus:outline-none"
+          rows={1}
+          className="flex-1 min-w-0 px-3 py-2 rounded text-sm focus:outline-none resize-none overflow-hidden"
           style={{
             border: '1.5px solid #111111',
             color: '#111111',
             backgroundColor: '#FFFFFF',
+            maxHeight: '200px',
+            minHeight: '36px',
+            lineHeight: '1.4',
           }}
         />
         <Button

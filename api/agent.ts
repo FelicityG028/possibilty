@@ -180,6 +180,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const systemPrompt = mode === 'adjust' ? SYSTEM_PROMPT_ADJUST : SYSTEM_PROMPT_GENERATE
   const userPrompt = JSON.stringify(input, null, 2)
 
+  // 用 AbortController 给 dashscope 25s 上限（避免 Vercel 60s 函数超时触发 504）
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 25_000)
+
   try {
     const upstream = await fetch(
       'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
@@ -192,18 +196,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         body: JSON.stringify({
           model: 'qwen-turbo',
           temperature: 0.3,
-          max_tokens: 6000,
+          max_tokens: 3000,
           messages: [
             { role: 'system', content: systemPrompt },
             { role: 'user', content: userPrompt },
           ],
         }),
+        signal: controller.signal,
       }
     )
 
+    clearTimeout(timeout)
     const respBody = await upstream.text()
     res.status(upstream.status).setHeader('Content-Type', 'application/json').send(respBody)
   } catch (err) {
+    clearTimeout(timeout)
+    if (err instanceof Error && err.name === 'AbortError') {
+      res.status(504).json({
+        error: 'dashscope 请求超时（25s）',
+        hint: '可能是 prompt 太长或模型响应慢。试试简化请求，或联系管理员。',
+      })
+      return
+    }
     res.status(502).json({
       error: err instanceof Error ? err.message : 'Upstream fetch failed',
     })
