@@ -47,6 +47,7 @@ export function SubTaskForm({ open, onClose, editing }: SubTaskFormProps) {
   const [deadline, setDeadline] = useState(isoAddDays(7))
   // recurring field
   const [dailyHours, setDailyHours] = useState('1')
+  const [recurringStartDate, setRecurringStartDate] = useState('') // 开始日期（可选）
   const [recurringDeadline, setRecurringDeadline] = useState('') // 截止时间（可选）
   // shared
   const [notes, setNotes] = useState('')
@@ -74,6 +75,7 @@ export function SubTaskForm({ open, onClose, editing }: SubTaskFormProps) {
         setDeadline(editing.deadline ?? isoAddDays(7))
       } else {
         setDailyHours(String(editing.daily_hours ?? '1'))
+        setRecurringStartDate(editing.start_date ?? '')
         setRecurringDeadline(editing.deadline ?? '')
       }
       setNotes(editing.notes ?? '')
@@ -86,6 +88,7 @@ export function SubTaskForm({ open, onClose, editing }: SubTaskFormProps) {
       setHours('')
       setDeadline(isoAddDays(7))
       setDailyHours('1')
+      setRecurringStartDate('')
       setRecurringDeadline('')
       setNotes('')
     }
@@ -140,6 +143,7 @@ export function SubTaskForm({ open, onClose, editing }: SubTaskFormProps) {
         units_per_period: u,
         period_hours: h,
         deadline,
+        start_date: null,
         daily_hours: null,
         notes: notes.trim() || null,
       }
@@ -153,6 +157,10 @@ export function SubTaskForm({ open, onClose, editing }: SubTaskFormProps) {
         setError('截止日期不能早于今天')
         return
       }
+      if (recurringStartDate && recurringDeadline && recurringStartDate > recurringDeadline) {
+        setError('开始日期不能晚于截止日期')
+        return
+      }
       payload = {
         category_id: categoryId,
         name: name.trim(),
@@ -161,6 +169,7 @@ export function SubTaskForm({ open, onClose, editing }: SubTaskFormProps) {
         units_per_period: null,
         period_hours: null,
         deadline: recurringDeadline || null,
+        start_date: recurringStartDate || null,
         daily_hours: dh,
         notes: notes.trim() || null,
       }
@@ -344,12 +353,26 @@ export function SubTaskForm({ open, onClose, editing }: SubTaskFormProps) {
                 type="date"
                 value={recurringDeadline}
                 onChange={(e) => setRecurringDeadline(e.target.value)}
-                min={isoToday()}
+                min={recurringStartDate || isoToday()}
               />
+            </div>
+            <div className="mt-3">
+              <Input
+                label="开始日期（可选）"
+                name="recurringStartDate"
+                type="date"
+                value={recurringStartDate}
+                onChange={(e) => setRecurringStartDate(e.target.value)}
+                min={isoToday()}
+                max={recurringDeadline || undefined}
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                从这天起每天排；不填 = 从今天起。优先级最高，先于其他任务占用容量。
+              </p>
             </div>
             <p className="text-xs text-gray-500 mt-2">
               ≈ {parseInt(dailyHours || '0', 10) * 60} 分钟/天
-              {!recurringDeadline && ' · 不填 = 永久有效'}
+              {!recurringDeadline && ' · 不填截止 = 永久有效'}
             </p>
           </div>
         )}

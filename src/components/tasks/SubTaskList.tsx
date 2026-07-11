@@ -205,7 +205,11 @@ export function SubTaskList() {
                   </h3>
                   <div className="text-xs text-gray-500 mt-0.5">
                     {isRecurring ? (
-                      <>每天分配 {t.daily_hours}h</>
+                      <>
+                        每天分配 {t.daily_hours}h
+                        {t.start_date && ` · ${format(new Date(t.start_date), 'M月d日')} 起`}
+                        {t.deadline && ` · 至 ${format(new Date(t.deadline), 'M月d日')}`}
+                      </>
                     ) : (
                       <>
                         截止 {format(new Date(t.deadline!), 'yyyy-MM-dd')}

@@ -240,6 +240,35 @@ export function generatePlan(
     remainingHours.set(td.task.id, td.hoursRemaining)
   }
 
+  // 6b.1 ★ 每日任务（recurring）最高优先级：先于 finite 任务分配
+  //   - 当天 available_hours=0（用户主动设为休息日）：跳过
+  //   - 其他天：每天都排 daily_hours，先占走容量，finite 任务只能用剩余容量
+  //   - ★ start_date 控制从哪天开始排（用户没填则从今天起）
+  for (const t of sorted) {
+    if (t.kind !== 'recurring') continue
+    if (!t.daily_hours) continue
+    totalRemainingHours += t.daily_hours * dates.length
+    const endDateForRecurring = t.deadline ? parseIso(t.deadline) : endDate
+    const startDateForRecurring = t.start_date ? parseIso(t.start_date) : startDate
+    for (const d of dates) {
+      const day = parseIso(d)
+      if (day < startDateForRecurring) continue
+      if (day > endDateForRecurring) break
+      const free = capacity.get(d) ?? 0
+      if (free <= 0) continue
+      // 容量紧张时至少排 0.01h（保证每天都显示该任务）
+      const alloc = Math.max(0.01, Math.min(free, t.daily_hours))
+      if (alloc > 0.001) {
+        entriesByDate[d].push({
+          sub_task_id: t.id,
+          planned_hours: alloc,
+          planned_amount: 0,
+        })
+        capacity.set(d, (capacity.get(d) ?? 0) - alloc)
+      }
+    }
+  }
+
   // 从后往前处理每一天
   for (let i = dates.length - 1; i >= 0; i--) {
     const d = dates[i]

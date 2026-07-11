@@ -24,6 +24,8 @@ export interface SubTask {
   period_hours: number | null
   /** finite 任务：截止日期；recurring 任务：null */
   deadline: string | null
+  /** recurring 任务：从这天起每天排；null = 从今天起。finite 任务忽略 */
+  start_date: string | null
   completed_amount: number
   /** finite = 有总量和截止日期；recurring = 每天固定时长（如背单词 30min/天） */
   kind: 'finite' | 'recurring'
