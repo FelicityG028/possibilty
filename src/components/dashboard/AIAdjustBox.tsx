@@ -60,6 +60,7 @@ async function applyAdjustments(args: {
   // 2. 计算最终 entries
   // 2a. 范围外（swap / 范围外的 add/remove）应用到 baseEntries
   let entries: DailyPlanEntry[] = baseEntries
+  console.log('[AIAdjust] output.recompute_range =', JSON.stringify(output.recompute_range), '| actions.length =', output.actions.length)
   if (output.recompute_range) {
     // 范围内让 generatePlan 接管，只 apply 范围外 actions
     const { from, to } = output.recompute_range
@@ -122,8 +123,10 @@ async function applyAdjustments(args: {
   })
 
   // 4. 写回 DB
+  console.log('[AIAdjust] tagged count:', tagged.length, '| sample first 3:',
+    tagged.slice(0, 3).map(e => `${e.plan_date}|${e.sub_task_id.slice(0,8)}|h=${e.planned_hours}`).join(' / '))
   if (tagged.length === 0) return
-  const { error: rpcErr } = await supabase.rpc('sync_daily_plan', {
+  const { error: rpcErr, data: rpcData } = await supabase.rpc('sync_daily_plan', {
     p_entries: tagged,
     p_delete_from: today,
   })
@@ -132,6 +135,7 @@ async function applyAdjustments(args: {
     console.error('[AIAdjust] RPC FAILED:', rpcErr.message)
     return
   }
+  console.log('[AIAdjust] RPC success:', rpcData)
   // 刷新 React Query 缓存，让 UI 显示最新 entries
   qc.invalidateQueries({ queryKey: ['daily_plan'] })
   qc.invalidateQueries({ queryKey: ['daily_summary'] })
