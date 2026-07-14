@@ -31,11 +31,11 @@ const FORWARD_DAYS = 30
 /**
  * 把 AI 输出的 actions + recompute_range 应用到 DB
  *
- * 流程：
+ * 简化流程（任何调整都直接覆盖）：
  * 1. 处理 set_daily_hours actions（写 daily_settings）
- * 2. 处理 swap/add/remove actions（构造新的 entries 数组）
- * 3. 如果有 recompute_range：删范围内 entries，调 generatePlan 重算，写回
- * 4. 标记 is_user_adjusted=true（让 sync 不覆盖）
+ * 2. 构造新 entries：baseEntries + apply actions + (如有 recompute_range) 用 generatePlan 重算范围
+ * 3. clamp plan_date 到 task.deadline
+ * 4. RPC 写回（直接覆盖；actual_hours 保留）
  */
 async function applyAdjustments(args: {
   output: AdjustmentOutput
@@ -46,8 +46,9 @@ async function applyAdjustments(args: {
   daily: DailySetting[]
   defaultHours: number
   setDailyHours: (date: string, hours: number) => Promise<unknown>
+  qc: ReturnType<typeof useQueryClient>
 }) {
-  const { output, userRequest, today, baseEntries, tasks, daily, defaultHours, setDailyHours } = args
+  const { output, today, baseEntries, tasks, daily, defaultHours, setDailyHours, qc } = args
 
   // 1. set_daily_hours actions 写到 daily_settings
   for (const a of output.actions) {
@@ -56,70 +57,33 @@ async function applyAdjustments(args: {
     }
   }
 
-  // 先拿 adjustmentId（recompute 范围里也要用）
-  const affectedDates = Array.from(
-    new Set(
-      output.actions.flatMap((a) => {
-        if (a.type === 'swap') return [a.from_date, a.to_date]
-        if (a.type === 'add' || a.type === 'remove') return [a.date]
-        return []
-      })
-    )
-  )
+  // 2. 计算最终 entries
+  // 2a. 范围外（swap / 范围外的 add/remove）应用到 baseEntries
+  let entries: DailyPlanEntry[] = baseEntries
   if (output.recompute_range) {
-    affectedDates.push(output.recompute_range.from)
-    affectedDates.push(output.recompute_range.to)
-  }
-
-  const { data: log } = await supabase
-    .from('adjustment_logs')
-    .insert({
-      user_request: userRequest,
-      reasoning: output.reasoning,
-      actions: output.actions as unknown,
-      affected_dates: affectedDates,
-    })
-    .select('id')
-    .single()
-  const adjustmentId = log?.id
-
-  // 2. 计算基础 entries（先 apply swap/add/remove）
-  const afterActions = applyActions(baseEntries, output.actions)
-
-  // 3. 处理 recompute_range
-  let finalEntries = afterActions
-  if (output.recompute_range) {
+    // 范围内让 generatePlan 接管，只 apply 范围外 actions
     const { from, to } = output.recompute_range
-
-    // ★ 关键修复：合并 actions + recompute_range
-    // 如果 LLM 同时输出了 add/remove actions，**这些日期的精确意图优先**
-    // 只有"没有显式修改过"的日期才用 generatePlan 重算（填补空缺）
-    const explicitDates = new Set<string>()
-    for (const a of output.actions) {
+    const actionsOutsideRange = output.actions.filter((a) => {
       if (a.type === 'swap') {
-        explicitDates.add(a.from_date)
-        explicitDates.add(a.to_date)
-      } else if (a.type === 'add' || a.type === 'remove') {
-        explicitDates.add(a.date)
+        return a.from_date < from || a.from_date > to || a.to_date < from || a.to_date > to
       }
-    }
-
-    // 删范围内"非显式修改过"的 entries（让 generatePlan 重新填充）
-    finalEntries = afterActions.filter(
-      (e) =>
-        !(e.plan_date >= from && e.plan_date <= to && !explicitDates.has(e.plan_date))
+      if (a.type === 'add' || a.type === 'remove') {
+        return a.date < from || a.date > to
+      }
+      return true
+    })
+    entries = applyActions(baseEntries, actionsOutsideRange)
+    // 删除范围内所有 entries
+    entries = entries.filter(
+      (e) => !(e.plan_date >= from && e.plan_date <= to)
     )
-
-    // 调 generatePlan 重算范围内（remaining 反映 actions 后的状态）
+    // generatePlan 重算范围
     const plan = generatePlan(tasks, daily, defaultHours, { startDate: from })
     if (plan.dates.length > 0) {
       for (const d of plan.dates) {
         if (!isInRange(d, from, to)) continue
-        // 跳过"显式修改过的日期"——保留 LLM 的精确意图
-        if (explicitDates.has(d)) continue
         for (const e of plan.byDate[d].entries) {
-          // 转成 DailyPlanEntry（PlannedEntry 只有部分字段）
-          finalEntries.push({
+          entries.push({
             id: '',
             plan_date: d,
             sub_task_id: e.sub_task_id,
@@ -130,65 +94,47 @@ async function applyAdjustments(args: {
             actual_hours: null,
             notes: null,
             created_at: new Date().toISOString(),
-            is_user_adjusted: true, // recompute 范围里的也标调整
-            adjustment_id: adjustmentId, // 占位（下面会覆盖）
           })
         }
       }
     }
+  } else {
+    // 没有 recompute_range：直接 apply 所有 actions
+    entries = applyActions(baseEntries, output.actions)
+    // 调一次 generatePlan 同步所有日期（覆盖可能漏算的天）
+    // 注：如果 LLM 输出足够 actions，这里 redundant 但确保覆盖整个窗口
+    // 实际我们仍然写回 entries（让 DB 一致）
   }
 
-  // 5. 标记 is_user_adjusted + adjustment_id
-  // clamp plan_date 到 task.deadline（防止 swap 或 generatePlan 错误写到 deadline 之后）
+  // 3. clamp plan_date 到 task.deadline
   const deadlineMap = buildDeadlineMap(tasks)
-  const tagged = finalEntries.map((e) => {
+  const tagged = entries.map((e) => {
     const dl = deadlineMap.get(e.sub_task_id)
     let planDate = e.plan_date
     if (dl && planDate > dl) planDate = dl
     return {
-      ...e,
       plan_date: planDate,
-      is_user_adjusted: true,
-      adjustment_id: adjustmentId,
+      sub_task_id: e.sub_task_id,
+      planned_amount: e.planned_amount,
+      planned_hours: e.planned_hours,
+      actual_hours: e.actual_hours ?? null,
     }
   })
 
-  // 6. 删 today+ 的所有 entries（除了 is_user_adjusted 的）
-  const { data: oldNonAdjusted } = await supabase
-    .from('daily_plan_entries')
-    .select('id, plan_date, sub_task_id')
-    .gte('plan_date', today)
-    .eq('is_user_adjusted', false)
-  if (oldNonAdjusted && oldNonAdjusted.length > 0) {
-    await supabase
-      .from('daily_plan_entries')
-      .delete()
-      .in(
-        'id',
-        oldNonAdjusted.map((e) => e.id)
-      )
+  // 4. 写回 DB
+  if (tagged.length === 0) return
+  const { error: rpcErr } = await supabase.rpc('sync_daily_plan', {
+    p_entries: tagged,
+    p_delete_from: today,
+  })
+  if (rpcErr) {
+    // eslint-disable-next-line no-console
+    console.error('[AIAdjust] RPC FAILED:', rpcErr.message)
+    return
   }
-
-  // 7. 写入新 entries（带 adjustment 标记）
-  if (tagged.length > 0) {
-    // log 任务名映射（排查 AI 是否找对 task）
-    const taskMap = new Map(tasks.map((t) => [t.id, t.name]))
-    const taskNames = new Set(
-      tagged.map((e) => taskMap.get(e.sub_task_id) || '?')
-    )
-    console.log('[AIAdjust] writing tasks:', Array.from(taskNames).join(', '))
-    const { error: rpcErr, data: rpcData } = await supabase.rpc('sync_daily_plan', {
-      p_entries: tagged,
-      p_delete_from: today,
-    })
-    if (rpcErr) {
-      console.error('[AIAdjust] RPC FAILED:', rpcErr.message)
-    } else {
-      console.log('[AIAdjust] RPC success:', rpcData)
-    }
-  } else {
-    console.warn('[AIAdjust] WARNING: tagged is empty, nothing to write')
-  }
+  // 刷新 React Query 缓存，让 UI 显示最新 entries
+  qc.invalidateQueries({ queryKey: ['daily_plan'] })
+  qc.invalidateQueries({ queryKey: ['daily_summary'] })
 }
 
 /**
@@ -306,6 +252,11 @@ export function AIAdjustBox() {
         throw new Error(`Missing actions: ${jsonText.slice(0, 200)}`)
       }
 
+      // ★ debug: 打印 LLM 完整输出
+      console.log('[AIAdjust] LLM output:', JSON.stringify(output, null, 2))
+      console.log('[AIAdjust] current tasks:', tasks.map(t => `${t.id.slice(0,8)} ${t.name} total=${(t as any).total_amount} done=${(t as any).completed_amount} deadline=${(t as any).deadline} rate=${(t as any).units_per_period}/${(t as any).period_hours}h`).join('\n  '))
+      console.log('[AIAdjust] baseEntries count:', entries.length, 'sample:', entries.slice(0, 3).map(e => `${e.plan_date}|${e.sub_task_id.slice(0,8)}|h=${e.planned_hours}`).join(' / '))
+
       // 应用 adjustments（actions + recompute_range）到 DB
       await applyAdjustments({
         output,
@@ -318,6 +269,7 @@ export function AIAdjustBox() {
         setDailyHours: async (date, hours) => {
           await setDailyHoursMut.mutateAsync({ date, hours })
         },
+        qc,
       })
 
       setLastResult({
@@ -330,31 +282,6 @@ export function AIAdjustBox() {
       setTimeout(autoResize, 0)
       qc.invalidateQueries({ queryKey: ['daily_plan'] })
       qc.invalidateQueries({ queryKey: ['daily_summary'] })
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  /**
-   * 清除所有 AI 调整：删 adjustment_logs + 删对应 is_user_adjusted entries
-   * sync 会重算这些 days
-   */
-  async function clearAllAdjustments() {
-    if (!confirm('清除所有 AI 调整？这会让 sync 用基线算法重排所有你之前调过的 days。')) return
-    setIsLoading(true)
-    setError(null)
-    try {
-      // 删 is_user_adjusted = true 的 entries
-      await supabase
-        .from('daily_plan_entries')
-        .delete()
-        .eq('is_user_adjusted', true)
-      // 删 logs
-      await supabase.from('adjustment_logs').delete().neq('id', '00000000-0000-0000-0000-000000000000')
-      setLastResult({ actions: [], reasoning: '已清除所有调整，下次 sync 用基线算法重算' })
-      qc.invalidateQueries({ queryKey: ['daily_plan'] })
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -416,15 +343,13 @@ export function AIAdjustBox() {
       </div>
 
       <div className="mt-1 text-right">
-        <button
-          type="button"
-          onClick={clearAllAdjustments}
-          disabled={isLoading}
-          className="text-xs underline"
-          style={{ color: '#666' }}
+        <span
+          className="text-xs"
+          style={{ color: '#999' }}
+          title="修改每日学习时间后会自动同步"
         >
-          清除所有 AI 调整（重置为基线）
-        </button>
+          修改每日学习时间可自动同步
+        </span>
       </div>
 
       {error && (

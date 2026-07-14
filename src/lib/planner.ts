@@ -314,29 +314,7 @@ export function generatePlan(
     }
   }
 
-  // 7. 每日任务（recurring）：每天固定时长
-  for (const t of sorted) {
-    if (t.kind !== 'recurring') continue
-    if (!t.daily_hours) continue
-    totalRemainingHours += t.daily_hours * dates.length
-    const endDateForRecurring = t.deadline ? parseIso(t.deadline) : endDate
-    for (const d of dates) {
-      const day = parseIso(d)
-      if (day < startDate) continue
-      if (day > endDateForRecurring) break
-      const free = capacity.get(d) ?? 0
-      if (free <= 0) continue
-      const alloc = Math.min(free, t.daily_hours)
-      if (alloc > 0.001) {
-        entriesByDate[d].push({
-          sub_task_id: t.id,
-          planned_hours: alloc,
-          planned_amount: 0,
-        })
-        capacity.set(d, free - alloc)
-      }
-    }
-  }
+  // （recurring 任务在 6b.1 已经先于 finite 分配过，这里不再重复）
 
   // 7. 组装 DayPlan
   const byDate: Record<string, DayPlan> = {}

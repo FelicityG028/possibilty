@@ -258,8 +258,6 @@ export function applyActions(
             notes: null,
             actual_amount: null,
             created_at: new Date().toISOString(),
-            is_user_adjusted: false,
-            adjustment_id: null,
           }),
           plan_date: action.date,
           sub_task_id: action.sub_task_id,

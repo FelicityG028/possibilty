@@ -108,6 +108,16 @@ const SYSTEM_PROMPT_ADJUST = `你是"学习排程助手"。用户已经有一个
 - 输出时表示：**删范围内所有 entries，调用 generatePlan 重算**（用剩余 capacity 重新填满）
 - 范围 = "要重排的日期"
 - **空出时间必须补上**：如果用户说"X 这周不做"，必须输出 recompute_range 让 A、B 填满 X 留下的空
+- ★ **用 recompute_range 时绝对不要输出范围内的 remove actions**！
+  - ❌ 错误：recompute_range: {7-21~7-30} + 10 个 7-21~7-30 的 remove（浪费 token + 容易超 max_tokens 截断）
+  - ✅ 正确：recompute_range: {7-21~7-30}，范围内的内容让前端用 generatePlan 重新算
+  - 范围内已有 remove 是 prompt 旧版本要求的，**新版本已废弃**，不要再输出
+
+# ⚠️ 输出 token 限制（重要）
+- max_tokens=6000，但 actions 数组太长可能截断
+- **严格遵守**：能 1 个 recompute_range 解决的就不要 30 个 remove
+- 典型输出大小：recompute 范围调整 = ~200 字符；add/remove 几个 = ~500 字符
+- **不要重复 remove 同一 task 的相邻日期**（用 recompute_range 一行解决）
 
 # ⚠️ "也可以排" / "空闲时间" / "在 Y 段时间排 X" 语义（关键，常见误判！）
 - 用户说"X 时间段也可以排 Y 任务" / "Y 任务在 7.17-7.27 也排一些" → **不是**删现有任务，是"在保留现有任务的前提下给 Y 加量"
@@ -196,7 +206,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         body: JSON.stringify({
           model: 'qwen-turbo',
           temperature: 0.3,
-          max_tokens: 3000,
+          max_tokens: 6000,
           messages: [
             { role: 'system', content: systemPrompt },
             { role: 'user', content: userPrompt },
