@@ -269,47 +269,80 @@ export function generatePlan(
     }
   }
 
-  // 从后往前处理每一天
-  for (let i = dates.length - 1; i >= 0; i--) {
+  // 从前往后处理每一天：紧急任务（deadline 早）优先
+  //   - 每天按 deadline ASC 排序的 eligible tasks 分配 capacity
+  //   - 每个 task 装到 dailyShare 上限（不放大，避免抢非紧急任务空间）
+  //   - 装满 dailyShare 的任务不再占用当天 capacity
+  //   - 富余 capacity 分给"已装满 dailyShare 的任务"作 bonus（让紧急任务多装）
+  for (let i = 0; i < dates.length; i++) {
     const d = dates[i]
     const dayDate = parseIso(d)
-    const free = capacity.get(d) ?? 0
+    let free = capacity.get(d) ?? 0
     if (free <= 0.001) continue
 
-    // 收集窗口包含该天且仍有剩余工作量的任务
-    const eligible = activeTasks.filter((td) => {
-      if (dayDate > td.deadlineDate) return false
-      const rem = remainingHours.get(td.task.id) ?? 0
-      return rem > 0.001
-    })
-    if (eligible.length === 0) continue
+    // 按 deadline ASC 排序（最紧急的先填）
+    const eligible = activeTasks
+      .filter((td) => {
+        if (dayDate > td.deadlineDate) return false
+        return (remainingHours.get(td.task.id) ?? 0) > 0.001
+      })
+      .sort((a, b) => {
+        if (a.deadlineDate.getTime() !== b.deadlineDate.getTime()) {
+          return a.deadlineDate.getTime() - b.deadlineDate.getTime()
+        }
+        return (remainingHours.get(b.task.id) ?? 0) - (remainingHours.get(a.task.id) ?? 0)
+      })
 
-    // 计算当天总需求
-    const totalDemand = eligible.reduce((s, td) => s + td.dailyShare, 0)
-    if (totalDemand <= 0.001) continue
-
-    // 动态分配：每分配一个任务后重新计算比例
-    let remainingFree = free
-    let remainingDemand = totalDemand
-
+    // 第一轮：每个 task 装 dailyShare（不放大）
+    const dayEntries = entriesByDate[d]
     for (const td of eligible) {
+      if (free <= 0.001) break
       const rem = remainingHours.get(td.task.id) ?? 0
       if (rem <= 0.001) continue
-      if (remainingDemand <= 0.001 || remainingFree <= 0.001) break
+      const want = Math.min(td.dailyShare, rem, free)
+      if (want <= 0.001) continue
+      dayEntries.push({
+        sub_task_id: td.task.id,
+        planned_hours: want,
+        planned_amount: want * td.rate,
+      })
+      remainingHours.set(td.task.id, rem - want)
+      capacity.set(d, free - want)
+      free -= want
+    }
 
-      const scale = remainingFree / remainingDemand
-      const want = td.dailyShare * scale
-      const alloc = Math.min(want, rem, remainingFree)
-      if (alloc > 0.001) {
-        entriesByDate[d].push({
-          sub_task_id: td.task.id,
-          planned_hours: alloc,
-          planned_amount: alloc * td.rate,
-        })
-        remainingHours.set(td.task.id, rem - alloc)
-        remainingFree -= alloc
-        remainingDemand -= td.dailyShare
-        capacity.set(d, (capacity.get(d) ?? 0) - alloc)
+    // 第二轮：富余 capacity 给"还没填满"的紧急任务加 bonus
+    // （合并到已有 entry，不新增重复 entry）
+    if (free > 0.001) {
+      const fillableTasks = eligible.filter((td) => {
+        const rem = remainingHours.get(td.task.id) ?? 0
+        return rem > 0.001
+      })
+      if (fillableTasks.length > 0) {
+        const totalRem = fillableTasks.reduce((s, td) => s + (remainingHours.get(td.task.id) ?? 0), 0)
+        for (const td of fillableTasks) {
+          if (free <= 0.001) break
+          const rem = remainingHours.get(td.task.id) ?? 0
+          if (rem <= 0.001) continue
+          const bonus = (rem / totalRem) * free
+          if (bonus <= 0.001) continue
+          // 查找是否已有该 task 的 entry
+          const existing = dayEntries.find((e) => e.sub_task_id === td.task.id)
+          if (existing) {
+            existing.planned_hours += bonus
+            existing.planned_amount = existing.planned_hours * td.rate
+          } else {
+            dayEntries.push({
+              sub_task_id: td.task.id,
+              planned_hours: bonus,
+              planned_amount: bonus * td.rate,
+            })
+          }
+          remainingHours.set(td.task.id, rem - bonus)
+          const cap = capacity.get(d) ?? 0
+          capacity.set(d, cap - bonus)
+          free -= bonus
+        }
       }
     }
   }
