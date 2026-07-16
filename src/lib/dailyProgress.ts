@@ -45,18 +45,18 @@ export function getTodayProgress(
     }
   }
 
-  // finite 任务：基于 cumulative 推导
+// finite 任务：今天完成量 = entry.actual_amount（用户当天记录）
   const planned = todayEntry.planned_amount
+  const actual = todayEntry.actual_amount ?? 0
   if (planned <= 0) {
-    return { completed: 0, planned: 0, ratio: 1 }
+    return { completed: actual, planned: 0, ratio: 1 }
   }
 
-  const sumBefore = allEntries
-    .filter((e) => e.sub_task_id === task.id && e.plan_date < today)
-    .reduce((s, e) => s + e.planned_amount, 0)
-
-  const completed = Math.max(0, Math.min(planned, task.completed_amount - sumBefore))
-  return { completed, planned, ratio: completed / planned }
+  return {
+    completed: actual,
+    planned,
+    ratio: Math.min(1, actual / planned),
+  }
 }
 
 /**
@@ -88,15 +88,9 @@ export function getDayCompletion(
       const ah = e.actual_hours ?? 0
       actualHours += ah
     } else {
-      // finite 任务：基于 cumulative 推导
-      const sumBefore = entries
-        .filter((x) => x.sub_task_id === e.sub_task_id && x.plan_date < date)
-        .reduce((s, x) => s + x.planned_amount, 0)
-      const todayDone = Math.max(
-        0,
-        Math.min(e.planned_amount, task.completed_amount - sumBefore)
-      )
-      const fraction = e.planned_amount > 0 ? todayDone / e.planned_amount : 0
+      // finite 任务：今天完成 = entry.actual_amount（独立于计划）
+      const todayActual = e.actual_amount ?? 0
+      const fraction = e.planned_amount > 0 ? Math.min(1, todayActual / e.planned_amount) : 0
       actualHours += e.planned_hours * fraction
     }
   }

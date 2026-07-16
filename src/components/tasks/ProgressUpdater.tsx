@@ -1,8 +1,4 @@
-import { useState, useEffect } from 'react'
-import { useUpdateSubTask } from '@/hooks/useSubTasks'
 import type { SubTask, Category } from '@/lib/types'
-import { Input } from '@/components/ui/Input'
-import { Button } from '@/components/ui/Button'
 
 interface ProgressUpdaterProps {
   subTask: SubTask
@@ -11,19 +7,11 @@ interface ProgressUpdaterProps {
 }
 
 /**
- * 进度更新器：步进按钮 + 直接输入
- * 仅用于 finite 任务（recurring 没有"完成量"概念）
+ * 进度显示（只读）
+ * 完成量现在通过 daily_plan_entries.actual_amount 追踪，DB trigger 自动聚合到 sub_tasks.completed_amount
+ * 之前用户可以在这里手动修改总量，现在统一在日历视图（DayDetailDrawer）按天记录实际完成
  */
-export function ProgressUpdater({ subTask, category, compact }: ProgressUpdaterProps) {
-  const [draft, setDraft] = useState(String(subTask.completed_amount))
-  const [savedHint, setSavedHint] = useState(false)
-  const updateMut = useUpdateSubTask()
-
-  useEffect(() => {
-    setDraft(String(subTask.completed_amount))
-  }, [subTask.completed_amount])
-
-  // recurring 任务不应该用这个组件
+export function ProgressUpdater({ subTask, compact, category: _category }: ProgressUpdaterProps) {
   if (subTask.kind === 'recurring') {
     return (
       <span className="text-xs text-gray-500 italic">
@@ -33,79 +21,18 @@ export function ProgressUpdater({ subTask, category, compact }: ProgressUpdaterP
   }
 
   const total = subTask.total_amount ?? 0
-  const stepSize = 1 // 整数步长，去掉小数
-  const unit = category?.unit_label ?? ''
-
-  async function commit(value: number) {
-    const clamped = Math.max(0, Math.min(total, value))
-    if (clamped === subTask.completed_amount) return
-    const status = clamped >= total ? 'completed' : 'active'
-    await updateMut.mutateAsync({
-      id: subTask.id,
-      patch: { completed_amount: clamped, status },
-    })
-    setSavedHint(true)
-    setTimeout(() => setSavedHint(false), 1200)
-  }
-
-  function step(delta: number) {
-    const next = parseFloat(draft || '0') + delta
-    setDraft(String(Math.max(0, Math.min(total, next))))
-  }
+  const done = subTask.completed_amount ?? 0
 
   return (
     <div className={`flex items-center gap-2 ${compact ? '' : 'w-full'}`}>
-      <div className="flex items-center border border-gray-300 rounded-md overflow-hidden">
-        <button
-          type="button"
-          onClick={() => step(-stepSize)}
-          className="px-2 py-1 text-gray-600 hover:bg-gray-100"
-          aria-label="减少"
-        >
-          −
-        </button>
-        <Input
-          name="progress"
-          type="number"
-          step="1"
-          min="0"
-          max={total}
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onBlur={() => commit(parseInt(draft || '0', 10))}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault()
-              commit(parseInt(draft || '0', 10))
-              ;(e.target as HTMLInputElement).blur()
-            }
-          }}
-          className="!py-1 !px-2 !w-20 !border-0 !rounded-none text-center"
-        />
-        <button
-          type="button"
-          onClick={() => step(stepSize)}
-          className="px-2 py-1 text-gray-600 hover:bg-gray-100"
-          aria-label="增加"
-        >
-          +
-        </button>
+      <div className="flex items-center gap-1 px-2 py-1 text-sm text-gray-700 bg-gray-50 rounded-md">
+        <span className="font-medium">{done.toFixed(0)}</span>
+        <span className="text-gray-400">/</span>
+        <span className="text-gray-600">{total.toFixed(0)}</span>
       </div>
-      <span className="text-xs text-gray-500 whitespace-nowrap">
-        / {total} {unit}
-      </span>
       {!compact && (
-        <Button
-          type="button"
-          size="sm"
-          variant="secondary"
-          onClick={() => commit(parseInt(draft || '0', 10))}
-          disabled={updateMut.isPending}
-        >
-          {updateMut.isPending ? '保存…' : '保存'}
-        </Button>
+        <span className="text-xs text-gray-500">在日历视图按天记录实际完成</span>
       )}
-      {savedHint && <span className="text-xs text-green-600">已保存</span>}
     </div>
   )
 }

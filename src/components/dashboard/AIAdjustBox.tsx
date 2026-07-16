@@ -60,10 +60,15 @@ async function applyAdjustments(args: {
   // 2. 计算最终 entries
   // 2a. 范围外（swap / 范围外的 add/remove）应用到 baseEntries
   let entries: DailyPlanEntry[] = baseEntries
-  console.log('[AIAdjust] output.recompute_range =', JSON.stringify(output.recompute_range), '| actions.length =', output.actions.length)
+  console.log('[AIAdjust] output.recompute_range =', JSON.stringify(output.recompute_range), '| actions.length =', output.actions.length, '| baseEntries count =', baseEntries.length)
   if (output.recompute_range) {
-    // 范围内让 generatePlan 接管，只 apply 范围外 actions
+    console.log('[AIAdjust] >>> entering recompute_range branch')
     const { from, to } = output.recompute_range
+    // 把 actions 分为：范围内 vs 范围外
+    // 范围外：apply 到 baseEntries（用户改的范围外日期）
+    // 范围内：保留 baseEntries 的原 entries + add actions（不删！）
+    //       （因为 add actions 是用户明确要求保留的）
+    // 但范围内 baseEntries 中**除了用户 add 之外的**应该删（让 generatePlan 重算）
     const actionsOutsideRange = output.actions.filter((a) => {
       if (a.type === 'swap') {
         return a.from_date < from || a.from_date > to || a.to_date < from || a.to_date > to
@@ -73,13 +78,32 @@ async function applyAdjustments(args: {
       }
       return true
     })
+    // 范围外的 actions 直接 apply
     entries = applyActions(baseEntries, actionsOutsideRange)
-    // 删除范围内所有 entries
-    entries = entries.filter(
-      (e) => !(e.plan_date >= from && e.plan_date <= to)
+    console.log('[AIAdjust] after applyActions(actionsOutsideRange), entries count =', entries.length)
+
+    // ★ 收集范围内 add actions（这些是用户明确要的，保留！）
+    const inRangeAdds: typeof output.actions = []
+    for (const a of output.actions) {
+      if (a.type === 'add' && a.date >= from && a.date <= to) {
+        inRangeAdds.push(a)
+      }
+    }
+
+    // 删除范围内除了 add actions 涉及的 entry 之外的所有 entries
+    const addKeys = new Set(
+      inRangeAdds
+        .filter((a): a is Extract<typeof a, { type: 'add' }> => a.type === 'add')
+        .map(a => `${a.date}|${a.sub_task_id}`)
     )
-    // generatePlan 重算范围
+    entries = entries.filter(
+      (e) => !(e.plan_date >= from && e.plan_date <= to && !addKeys.has(`${e.plan_date}|${e.sub_task_id}`))
+    )
+    console.log('[AIAdjust] after filter range, entries count =', entries.length)
+
+    // generatePlan 重算范围（会基于 task 剩余 + 容量分配）
     const plan = generatePlan(tasks, daily, defaultHours, { startDate: from })
+    console.log('[AIAdjust] plan.dates.length =', plan.dates.length)
     if (plan.dates.length > 0) {
       for (const d of plan.dates) {
         if (!isInRange(d, from, to)) continue
@@ -99,12 +123,11 @@ async function applyAdjustments(args: {
         }
       }
     }
+    console.log('[AIAdjust] after generatePlan push, entries count =', entries.length)
   } else {
+    console.log('[AIAdjust] >>> entering ELSE branch (no recompute_range)')
     // 没有 recompute_range：直接 apply 所有 actions
     entries = applyActions(baseEntries, output.actions)
-    // 调一次 generatePlan 同步所有日期（覆盖可能漏算的天）
-    // 注：如果 LLM 输出足够 actions，这里 redundant 但确保覆盖整个窗口
-    // 实际我们仍然写回 entries（让 DB 一致）
   }
 
   // 3. clamp plan_date 到 task.deadline

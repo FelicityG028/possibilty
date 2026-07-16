@@ -1,6 +1,8 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
+import { supabase } from '@/lib/supabase'
 import { useDailyPlanEntries } from '@/hooks/useDailyPlan'
-import { useSubTasks, useUpdateSubTask } from '@/hooks/useSubTasks'
+import { useSubTasks } from '@/hooks/useSubTasks'
 import { useCategories } from '@/hooks/useCategories'
 import { useSetDailyActual } from '@/hooks/useDailyActual'
 import { ProgressBar } from '@/components/ui/ProgressBar'
@@ -26,8 +28,8 @@ export function DayDetailDrawer({ date, onClose }: DayDetailDrawerProps) {
   const { data: categories = [] } = useCategories()
   const { data: settings = [] } = useDailySettings()
   const { data: defaultSetting } = useDefaultSetting()
-  const updateMut = useUpdateSubTask()
   const setActual = useSetDailyActual()
+  const qc = useQueryClient()
   const [showOverflow, setShowOverflow] = useState(false)
 
   const taskMap = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks])
@@ -56,16 +58,17 @@ export function DayDetailDrawer({ date, onClose }: DayDetailDrawerProps) {
         actualHours: clamped,
       })
     } else {
-      const sumBefore = entries
-        .filter((e) => e.sub_task_id === taskId && e.plan_date < date)
-        .reduce((s, e) => s + e.planned_amount, 0)
-      const newCompleted = sumBefore + amount
-      const clamped = Math.max(0, Math.min(task.total_amount ?? Infinity, newCompleted))
-      const status = clamped >= (task.total_amount ?? Infinity) ? 'completed' : 'active'
-      await updateMut.mutateAsync({
-        id: taskId,
-        patch: { completed_amount: clamped, status },
-      })
+      // 写入 entry.actual_amount（实际完成量），DB trigger 会自动聚合到 sub_tasks.completed_amount
+      // 不再基于 planned_amount 累加（避免计划变化影响已完成量）
+      const clamped = Math.max(0, Math.min(task.total_amount ?? Infinity, amount))
+      await supabase
+        .from('daily_plan_entries')
+        .update({ actual_amount: clamped })
+        .eq('plan_date', date)
+        .eq('sub_task_id', taskId)
+      // 刷新 task query（让进度条更新）
+      qc.invalidateQueries({ queryKey: ['sub_tasks'] })
+      qc.invalidateQueries({ queryKey: ['daily_plan'] })
     }
   }
 

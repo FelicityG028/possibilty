@@ -119,6 +119,18 @@ const SYSTEM_PROMPT_ADJUST = `你是"学习排程助手"。用户已经有一个
 - 典型输出大小：recompute 范围调整 = ~200 字符；add/remove 几个 = ~500 字符
 - **不要重复 remove 同一 task 的相邻日期**（用 recompute_range 一行解决）
 
+# ⚠️ add actions vs recompute_range（关键！）
+- **add actions（精确指定任务量）**：用户说"高小方每天加到 2h" → 输出 11 个 add（每个 +1h）
+  - ✅ 用 add actions：精确控制每个 task 的量
+  - ❌ 不要同时输出 recompute_range：会让 add actions 被覆盖！
+- **recompute_range（重新计算整个范围）**：用户说"政治均分到 7.21-7.30" → 输出 1 个 recompute_range
+  - ✅ 用 recompute_range：让算法决定具体分配
+  - ❌ 不要同时输出范围内 add/remove：会冲突
+- **选择规则**：
+  - 用户明确说"每天 N 小时" / "加 N 小时" → **add actions**
+  - 用户说"均分" / "重排" / "重新安排" → **recompute_range**
+  - 两者**不要混用**
+
 # ⚠️ "也可以排" / "空闲时间" / "在 Y 段时间排 X" 语义（关键，常见误判！）
 - 用户说"X 时间段也可以排 Y 任务" / "Y 任务在 7.17-7.27 也排一些" → **不是**删现有任务，是"在保留现有任务的前提下给 Y 加量"
 - ❌ 禁止：看到"Y 在 X 段时间没排"就 remove 该时间段的 A、B
