@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useUIStore } from '@/store/uiStore'
 import { useSubTasks } from '@/hooks/useSubTasks'
 import { useCategories } from '@/hooks/useCategories'
@@ -8,7 +9,7 @@ import {
   useDailySettings,
   useDefaultSetting,
 } from '@/hooks/useDailySettings'
-import { useDailyPlanSync } from '@/hooks/useDailyPlanSync'
+import { useDailyPlanSync, syncPlanNow } from '@/hooks/useDailyPlanSync'
 import { useDailySummarySync } from '@/hooks/useDailySummarySync'
 import { MonthCalendar } from '@/components/calendar/MonthCalendar'
 import { GanttChart } from '@/components/gantt/GanttChart'
@@ -26,6 +27,7 @@ import { CompanionDog } from '@/components/dashboard/CompanionDog'
 export function DashboardPage() {
   useDailyPlanSync()
   useDailySummarySync()
+  const qc = useQueryClient()
   const viewMode = useUIStore((s) => s.viewMode)
   const today = useUIStore((s) => s.selectedDate)
   const { data: tasks = [] } = useSubTasks()
@@ -33,6 +35,17 @@ export function DashboardPage() {
   const { data: entries = [] } = useDailyPlanEntries()
   const { data: settings = [] } = useDailySettings()
   const { data: defaultSetting } = useDefaultSetting()
+  const [regenerating, setRegenerating] = useState(false)
+
+  async function handleRegenerate() {
+    if (regenerating) return
+    setRegenerating(true)
+    try {
+      await syncPlanNow(tasks, settings, defaultSetting?.available_hours ?? 6, qc)
+    } finally {
+      setRegenerating(false)
+    }
+  }
 
   const [todayExpanded, setTodayExpanded] = useState(true)
 
@@ -66,6 +79,15 @@ export function DashboardPage() {
           </p>
         </div>
         <div className="flex items-center gap-3">
+          <Button
+            onClick={handleRegenerate}
+            disabled={regenerating}
+            variant="secondary"
+            size="sm"
+            title="基于所有 actual_amount 重新生成计划"
+          >
+            {regenerating ? '排布中…' : '重新排布'}
+          </Button>
           <DailyHoursEditor date={today} />
           <ViewSwitcher />
         </div>

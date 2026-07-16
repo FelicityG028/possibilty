@@ -1,9 +1,13 @@
 /**
  * 把规划引擎的输出同步到 daily_plan_entries 表。
  *
- * 简化设计：任何 sync（基线 / daily_hours 变化 / AI 调整）都直接覆盖 DB。
+ * 关键设计：日常操作不重算 plan
+ *   - 加 actual_amount → 只更新完成量，不重算 plan（避免循环）
+ *   - 修改任务/默认学习时间 → mount 时跑一次
+ *   - 重新排布 → 手动调用 syncPlanNow()
+ *
  * 数据库只管记录"每天每个任务的安排"，不区分是谁写入的。
- * - actual_hours 保留旧的（不覆盖用户实际学习小时）
+ * - actual_hours / actual_amount 保留旧的（不覆盖用户实际学习）
  * - 单例锁：防止并发 sync
  */
 import { useEffect, useRef } from 'react'
@@ -18,8 +22,9 @@ import type { SubTask, DailySetting, DailyPlanEntry } from '@/lib/types'
 let syncing = false
 
 /**
- * 监听任务/设置变化，把 plan 写回 daily_plan_entries。
- * 任何变化（task / daily_hours / default_hours）都触发全量重算 + 覆盖。
+ * 监听 mount 时的 tasks / daily 变化，只在 mount 跑一次
+ *   日常操作（actual_amount）不会触发重算
+ *   用户可手动调 syncPlanNow() 触发重算（"重新排布"按钮）
  */
 export function useDailyPlanSync() {
   const { data: tasks = [] } = useSubTasks()
@@ -36,8 +41,20 @@ export function useDailyPlanSync() {
       }, 500)
       return () => clearTimeout(t)
     }
-    void syncPlan(tasks, daily, defaultSetting?.available_hours ?? 6, qc)
+    // mount 之后不再自动 sync（避免加 actual_amount 时循环重算）
   }, [tasks, daily, defaultSetting, qc])
+}
+
+/**
+ * 手动触发重新排布（用户点"重新排布"按钮）
+ */
+export async function syncPlanNow(
+  tasks: SubTask[],
+  daily: DailySetting[],
+  defaultHours: number,
+  qc: ReturnType<typeof useQueryClient>
+): Promise<void> {
+  await syncPlan(tasks, daily, defaultHours, qc)
 }
 
 async function syncPlan(
@@ -63,10 +80,10 @@ async function doSync(
 ): Promise<void> {
   const today = todayIso()
 
-  // 抓取所有 today+ entries（用于保留 actual_hours）
+  // 抓取所有 today+ entries（用于保留 actual_hours 和 actual_amount）
   const { data: allExisting } = await supabase
     .from('daily_plan_entries')
-    .select('id, plan_date, sub_task_id, actual_hours')
+    .select('id, plan_date, sub_task_id, actual_hours, actual_amount')
     .gte('plan_date', today)
 
   const existingByKey = new Map<string, DailyPlanEntry>()
@@ -94,7 +111,7 @@ async function doSync(
         sub_task_id: e.sub_task_id,
         planned_amount: e.planned_amount,
         planned_hours: e.planned_hours,
-        // 保留 actual_hours（用户实际学习小时）
+        // 保留 actual_hours（用户实际学习小时），RPC 不覆盖
         actual_hours: old?.actual_hours ?? null,
       })
     }
