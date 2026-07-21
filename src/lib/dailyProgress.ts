@@ -89,9 +89,10 @@ export function getDayCompletion(
       actualHours += ah
     } else {
       // finite 任务：今天完成 = entry.actual_amount（独立于计划）
+      // 实际学习时长 = actual_amount / rate（超额完成也算实际时长）
       const todayActual = e.actual_amount ?? 0
-      const fraction = e.planned_amount > 0 ? Math.min(1, todayActual / e.planned_amount) : 0
-      actualHours += e.planned_hours * fraction
+      const rate = (task.units_per_period ?? 1) / (task.period_hours ?? 1)
+      actualHours += todayActual / rate
     }
   }
 
