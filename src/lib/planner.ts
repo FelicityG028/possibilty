@@ -60,11 +60,6 @@ export interface PlanResult {
 // 工具
 // --------------------------------------------------------------------------
 
-function parseIso(iso: string): Date {
-  const [y, m, d] = iso.split('-').map(Number)
-  return new Date(y, m - 1, d)
-}
-
 /**
  * 把日期字符串转成当天 23:59:59 本地时间
  * 避免 daysBetween / dateRange 因为 0:00 边界进位到下一天
@@ -85,6 +80,19 @@ export function todayIso(): string {
 function daysBetween(a: Date, b: Date): number {
   const ms = b.getTime() - a.getTime()
   return Math.round(ms / 86400000) + 1
+}
+
+/** 给 Date 加 N 天，返回新 Date */
+export function addDays(date: Date, days: number): Date {
+  const d = new Date(date)
+  d.setDate(d.getDate() + days)
+  return d
+}
+
+/** ISO 字符串转 Date */
+export function parseIso(iso: string): Date {
+  const [y, m, d] = iso.split('-').map(Number)
+  return new Date(y, m - 1, d)
 }
 
 export function dateRange(start: Date, days: number): string[] {

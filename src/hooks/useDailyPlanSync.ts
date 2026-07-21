@@ -1,10 +1,10 @@
 /**
  * 把规划引擎的输出同步到 daily_plan_entries 表。
  *
- * 关键设计：日常操作不重算 plan
+ * 关键设计：
  *   - 加 actual_amount → 只更新完成量，不重算 plan（避免循环）
  *   - 修改任务/默认学习时间 → mount 时跑一次
- *   - 重新排布 → 手动调用 syncPlanNow()
+ *   - 重新排布 → 手动调用 syncPlanNow() 或定时 12 点自动重排
  *
  * 数据库只管记录"每天每个任务的安排"，不区分是谁写入的。
  * - actual_hours / actual_amount 保留旧的（不覆盖用户实际学习）
@@ -15,16 +15,39 @@ import { useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { useSubTasks } from './useSubTasks'
 import { useDailySettings, useDefaultSetting } from './useDailySettings'
-import { generatePlan, todayIso } from '@/lib/planner'
-import type { SubTask, DailySetting, DailyPlanEntry } from '@/lib/types'
+import { generatePlan, todayIso, toIso, addDays, parseIso } from '../lib/planner'
+import type { SubTask, DailySetting, DailyPlanEntry } from '../lib/types'
 
 // 模块级锁：防止并发 sync
 let syncing = false
+
+// 模块级状态：记录上次自动重排日期（避免一天多次重排）
+let lastAutoRegenDate: string | null = null
+// 自动重排触发时间（24h 制小时，默认 12 点）
+const AUTO_REGEN_HOUR = 12
+
+/**
+ * 检查当前时间是否需要自动重排：
+ *   - 当前小时 >= AUTO_REGEN_HOUR
+ *   - 今天还没重排过（lastAutoRegenDate !== today）
+ */
+function shouldAutoRegenerate(): boolean {
+  const now = new Date()
+  if (now.getHours() < AUTO_REGEN_HOUR) return false
+  const today = now.toISOString().slice(0, 10)
+  return lastAutoRegenDate !== today
+}
+
+function markAutoRegenerated() {
+  lastAutoRegenDate = new Date().toISOString().slice(0, 10)
+}
 
 /**
  * 监听 mount 时的 tasks / daily 变化，只在 mount 跑一次
  *   日常操作（actual_amount）不会触发重算
  *   用户可手动调 syncPlanNow() 触发重算（"重新排布"按钮）
+ *
+ * 同时启动定时检查：每天 12 点（用户访问时）自动重排
  */
 export function useDailyPlanSync() {
   const { data: tasks = [] } = useSubTasks()
@@ -41,7 +64,20 @@ export function useDailyPlanSync() {
       }, 500)
       return () => clearTimeout(t)
     }
-    // mount 之后不再自动 sync（避免加 actual_amount 时循环重算）
+  }, [tasks, daily, defaultSetting, qc])
+
+  // 每天 12 点自动重排：每 5 分钟检查一次时间
+  useEffect(() => {
+    const checkAndRun = () => {
+      if (shouldAutoRegenerate()) {
+        markAutoRegenerated()
+        void syncPlan(tasks, daily, defaultSetting?.available_hours ?? 6, qc)
+      }
+    }
+    // 立即检查一次（如果今天还没重排过且已经过了 12 点）
+    checkAndRun()
+    const interval = setInterval(checkAndRun, 5 * 60 * 1000) // 5 分钟
+    return () => clearInterval(interval)
   }, [tasks, daily, defaultSetting, qc])
 }
 
@@ -79,6 +115,9 @@ async function doSync(
   qc: ReturnType<typeof useQueryClient>
 ): Promise<void> {
   const today = todayIso()
+  // ★ 关键：今天和过去的 plan 冻结（保留用户已完成的任务分配）
+  //   只有未来日期重排
+  const tomorrow = toIso(addDays(parseIso(today), 1))
 
   // 抓取所有 today+ entries（用于保留 actual_hours 和 actual_amount）
   const { data: allExisting } = await supabase
@@ -91,8 +130,8 @@ async function doSync(
     existingByKey.set(`${e.plan_date}|${e.sub_task_id}`, e)
   }
 
-  // 写死算法生成 plan
-  const plan = generatePlan(tasks, daily, defaultHours, { startDate: today })
+  // 写死算法生成 plan（从明天开始，今天和过去的 plan 冻结）
+  const plan = generatePlan(tasks, daily, defaultHours, { startDate: tomorrow })
   if (plan.dates.length === 0) return
 
   const newRows: Array<{
@@ -121,7 +160,7 @@ async function doSync(
 
   const { error: rpcErr } = await supabase.rpc('sync_daily_plan', {
     p_entries: newRows,
-    p_delete_from: today,
+    p_delete_from: tomorrow, // 只删/改明天+，今天的 plan 冻结
   })
   if (rpcErr) {
     // eslint-disable-next-line no-console
