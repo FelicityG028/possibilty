@@ -29,7 +29,8 @@ export function GanttChart() {
       if (dl < start) start = dl
       if (dl > end) end = dl
     }
-    start = addDays(start, -1)
+    // 右边 padding 1 天（视觉上 task bar 不贴右边界）
+    // 左边不加 padding（避免显示不存在的过去日期）
     end = addDays(end, 1)
     const span = differenceInDays(end, start) + 1
     return {
