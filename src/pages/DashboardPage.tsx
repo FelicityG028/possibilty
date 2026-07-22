@@ -23,6 +23,7 @@ import { Link } from 'react-router-dom'
 import { format } from 'date-fns'
 import { getTodayProgress, getAggregateProjection, getDayCompletion } from '@/lib/dailyProgress'
 import { CompanionDog } from '@/components/dashboard/CompanionDog'
+import { TaskCompletedCelebration } from '@/components/dashboard/TaskCompletedCelebration'
 
 export function DashboardPage() {
   useDailyPlanSync()
@@ -255,6 +256,9 @@ export function DashboardPage() {
         <div className="absolute top-2 right-2 z-30 pointer-events-none">
           <div className="pointer-events-auto">
             <CompanionDog ratio={dayRatio} hasTasks={todayEntries.length > 0} />
+
+      {/* 任务完成彩蛋：监听 tasks 完成度变化 */}
+      <TaskCompletedCelebration tasks={tasks} />
           </div>
         </div>
       </div>
