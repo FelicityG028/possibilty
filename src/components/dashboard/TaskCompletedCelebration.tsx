@@ -3,6 +3,8 @@
  *   屏幕中央显示彩蛋动画 + 恭喜消息，1.5 秒后消失
  *
  * 触发条件：task.completed_amount 跨过 task.total_amount
+ * 去重：每个任务只庆祝一次，使用 localStorage 持久化已庆祝任务 ID，
+ *       避免刷新页面或重新加载数据后反复提醒。
  */
 import { useEffect, useRef, useState } from 'react'
 import type { SubTask } from '@/lib/types'
@@ -17,13 +19,39 @@ interface Celebration {
   categoryColor?: string
 }
 
+const CELEBRATED_TASKS_KEY = 'celebrated-task-ids'
+
+function loadCelebratedIds(): Set<string> {
+  if (typeof window === 'undefined') return new Set()
+  try {
+    const raw = localStorage.getItem(CELEBRATED_TASKS_KEY)
+    if (!raw) return new Set()
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return new Set()
+    return new Set(parsed)
+  } catch {
+    return new Set()
+  }
+}
+
+function saveCelebratedIds(ids: Set<string>) {
+  if (typeof window === 'undefined') return
+  try {
+    localStorage.setItem(CELEBRATED_TASKS_KEY, JSON.stringify([...ids]))
+  } catch {
+    // 忽略隐私模式等写入失败
+  }
+}
+
 export function TaskCompletedCelebration({ tasks }: TaskCompletedCelebrationProps) {
   const [celebration, setCelebration] = useState<Celebration | null>(null)
   const prevStatusRef = useRef<Map<string, boolean>>(new Map())
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     const prevMap = prevStatusRef.current
     const nextMap = new Map<string, boolean>()
+    const celebratedIds = loadCelebratedIds()
 
     for (const t of tasks) {
       if (t.kind !== 'finite') continue
@@ -31,9 +59,11 @@ export function TaskCompletedCelebration({ tasks }: TaskCompletedCelebrationProp
       const isCompleted = t.completed_amount >= t.total_amount
       nextMap.set(t.id, isCompleted)
 
-      // 跨过 100% 边界
+      // 跨过 100% 边界，且该任务从未庆祝过
       const wasCompleted = prevMap.get(t.id) ?? false
-      if (!wasCompleted && isCompleted) {
+      if (!wasCompleted && isCompleted && !celebratedIds.has(t.id)) {
+        celebratedIds.add(t.id)
+        saveCelebratedIds(celebratedIds)
         // 找到 category 信息（可选）
         setCelebration({
           taskName: t.name,
@@ -41,12 +71,19 @@ export function TaskCompletedCelebration({ tasks }: TaskCompletedCelebrationProp
           categoryColor: undefined,
         })
         // 1.8 秒后自动消失
-        setTimeout(() => setCelebration(null), 1800)
+        if (timeoutRef.current) clearTimeout(timeoutRef.current)
+        timeoutRef.current = setTimeout(() => setCelebration(null), 1800)
       }
     }
 
     prevStatusRef.current = nextMap
   }, [tasks])
+
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current)
+    }
+  }, [])
 
   if (!celebration) return null
 

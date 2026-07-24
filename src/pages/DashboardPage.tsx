@@ -256,12 +256,12 @@ export function DashboardPage() {
         <div className="absolute top-2 right-2 z-30 pointer-events-none">
           <div className="pointer-events-auto">
             <CompanionDog ratio={dayRatio} hasTasks={todayEntries.length > 0} />
-
-      {/* 任务完成彩蛋：监听 tasks 完成度变化 */}
-      <TaskCompletedCelebration tasks={tasks} />
           </div>
         </div>
       </div>
+
+      {/* 任务完成彩蛋：监听 tasks 完成度变化 */}
+      <TaskCompletedCelebration tasks={tasks} />
     </div>
   )
 }
